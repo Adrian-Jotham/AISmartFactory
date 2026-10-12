@@ -1,0 +1,7 @@
+stage,variant,faulty_detected,healthy_false_alarms,median_lead_h,faulty_correct,mean_acc_last48h,separation_min,separation_median
+detection,peer-contrast energy (proposed),4/4,2/8,61.1,,,,
+detection,own-history energy,3/4,7/8,58.0,,,,
+identification,proposed,,,,4/4,0.607,2.68,6.859999999999999
+identification,no speed search,,,,1/4,0.0,0.31,1.52
+identification,own-history ref.,,,,3/4,0.471,0.28,6.455
+identification,baseline (fixed band),,,,4/4,0.688,1.03,1.455

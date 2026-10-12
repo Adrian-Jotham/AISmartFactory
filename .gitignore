@@ -1,0 +1,14 @@
+# Raw IMS bearing dataset (~6 GB) — download separately
+/1st_test/
+/2nd_test/
+/3rd_test/
+
+# Large regenerable intermediate arrays
+pipeline/outputs/*.npy
+
+# Python
+__pycache__/
+*.pyc
+
+# LibreOffice lock files
+.~lock.*#

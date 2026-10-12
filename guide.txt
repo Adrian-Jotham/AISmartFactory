@@ -1,0 +1,36 @@
+[Notice] Team Presentation Schedule and Guidelines
+
+Team presentations will begin in Week 5, on Tuesday, September 29. Please check the attached file for your presentation schedule.
+
+■ Topics and Presentation Format
+
+You may choose your topic freely, as long as it is related to fault diagnosis or predictive maintenance in smart factories.
+
+- Part I: Fault Diagnosis  
+  Choose one topic related to a machine, facility, sensor, communication system, or another part of a smart factory. 
+  Explain the possible faults and how they can be diagnosed. 
+  If possible, choose a topic related to your team members’ fields of study. AI/ML is not required for Part I.
+
+- Part II: Predictive Maintenance with AI  
+  Build on your Part I topic. Explain how condition data can be used to predict faults and support maintenance decisions.
+
+  Each team should work toward one shared topic and goal, with clear roles for all members. Presentation time is about 10 minutes per person.
+
+■ Submission of Presentation Slides
+
+Please email your slides to kyhwang@kumoh.ac.kr by the day before your presentation. The slides will be posted on LMS before the presentation.
+
+■ Evaluation and Class Participation
+
+Parts I and II will be evaluated together on a relative grading basis. Practical implementation using a dataset, simulation, or data analysis will be reflected in the “Technical Depth & Application” evaluation item.
+
+Please also listen carefully to other teams and ask questions when you are curious about their work. 
+During presentations, avoid sleeping, using your phone for unrelated activities, or leaving the room without a valid reason. 
+Attentive listening, questions, and overall class participation will be reflected in your participation grade.
+
+■ Additional Credit: Journal Submission
+
+If your team submits research related to its presentation topic to a domestic or international journal, including a Scopus-indexed journal, I will review the paper and proof of submission. 
+After confirmation, the team will receive the highest score for the assignment component.
+
+Please also submit a final report and, if applicable, your implementation or analysis materials. If you have any questions, email me at the address above.

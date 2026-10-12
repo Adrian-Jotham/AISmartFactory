@@ -1,0 +1,13 @@
+set,bearing,truth,stageA_alarm_h,ae_alarm_h,verdict_sim_cnn,fault_calls_before_last48h,sep_sim_cnn,acc48_sim_cnn,verdict_sup_cnn,sep_sup_cnn,acc48_sup_cnn,sup_classes_seen,verdict[proposed],sep[proposed],acc48h[proposed]
+1,1,healthy,,,healthy,0.0,,,,,,,healthy,,
+1,2,healthy,,,healthy,0.0,,,,,,,healthy,,
+1,3,inner,11.7,71.0,inner,0.0,14.63,0.133,outer,0.0,0.0,healthy/outer/roller,inner,3.86,0.267
+1,4,roller,96.7,118.9,unspecified,0.216,4.73,0.042,unspecified,0.0,0.0,healthy/outer/inner,roller,2.68,0.291
+2,1,outer,69.5,53.7,outer,0.228,962.78,1.0,outer,1000.0,1.0,healthy/outer/inner/roller,outer,50.19,1.0
+2,2,healthy,,,healthy,0.0,,,,,,,healthy,,
+2,3,healthy,,,healthy,0.0,,,,,,,healthy,,
+2,4,healthy,3.7,,outer,0.0,,,,,,,outer,,
+3,1,healthy,,,healthy,0.0,,,,,,,healthy,,
+3,2,healthy,,,healthy,0.0,,,,,,,healthy,,
+3,3,outer,52.7,,outer,0.0,53.59,0.851,outer,375.84,0.796,healthy/outer/inner/roller,outer,9.86,0.869
+3,4,healthy,728.1,,unspecified,0.0,,,,,,,unspecified,,

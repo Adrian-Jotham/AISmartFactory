@@ -1,0 +1,6 @@
+stage,method,faulty_detected,healthy_false_alarms,median_lead_h,faulty_correct,sep_min,sep_median,acc48_mean
+detection,Stage A: peer-contrast energy,4/4,2/8,61.1,,,,
+detection,D1: autoencoder + peer contrast,3/4,0/8,71.0,,,,
+identification,Stage B: physics combs (proposed),,,,4/4,2.68,6.859999999999999,0.607
+identification,D2: CNN trained on synthetic faults,,,,3/4,4.73,34.11,0.506
+identification,D3: CNN supervised on real labels (LORO),,,,2/4,0.0,187.92,0.449
