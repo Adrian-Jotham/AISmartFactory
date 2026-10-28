@@ -44,7 +44,7 @@ NasaDataset/
 ├── fault_diagnosis_explained.md           ← Part I explained simply (Feynman style, with figures)
 ├── fault_diagnosis_part1_short.pptx       ← 11-slide Part I presentation
 ├── fault_diagnosis_presentation.pptx      ← 22-slide full deck (Part I + deep-learning variant)
-├── predictive_maintenance_part2.pptx      ← 10-slide Part II presentation (maintenance strategies)
+├── predictive_maintenance_part2.pptx      ← 11-slide Part II presentation (maintenance strategies)
 ├── 1st_test/ 2nd_test/ 3rd_test/          ← raw data (not in git, ~6 GB, see Setup)
 └── pipeline/
     ├── common.py          shared loading, dead-snapshot removal, failed-run list
@@ -58,6 +58,7 @@ NasaDataset/
     ├── rul.py             Part II: RUL models
     ├── maintenance.py     Part II: maintenance strategy comparison (cost, lead-time sweep)
     ├── rul_bound.py       Part II experiment: conformal RUL bound vs act-at-alarm (negative result)
+    ├── maintenance_checks.py  Part II robustness: cross-talk, thresholds, leave-one-test-out, false-alarm cost
     └── outputs/           all CSVs and figures (the .npy arrays are not in git)
 ```
 
@@ -256,7 +257,7 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 
 \*The best fixed interval chosen **with hindsight** on this data (it sits just before set 1 ends), so preventive is shown at its most optimistic.
 
-**Why OR works:** the two detectors fail on different bearings. The autoencoder warns about set 1 B3 (inner race) 71 h ahead, where the physics alarm gives only 12 h; the physics alarm catches set 3 B3, which the autoencoder misses. Both detectors' thresholds were set on these same 12 bearings, so read this as complementarity on a case study, not a tuned optimum.
+**Why OR works:** at the default thresholds the two detectors fail on different bearings. The autoencoder warns about set 1 B3 (inner race) 71 h ahead, where the physics alarm gives only 12 h; the physics alarm catches set 3 B3, which the autoencoder misses. Set 1 B3's early AI alarm is its own impact signal (kurtosis, peak, crest), not cross-talk from its failing neighbour B4 (see 6.2).
 
 ![Cost per 1,000 h vs breakdown cost](pipeline/outputs/maintenance_strategies.png)
 
@@ -268,9 +269,22 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 | 12-48 h | 3/4, 2.0 | 3/4, 1.6 | **4/4, 0.8** |
 | 72 h | 1/4, 4.36 | 1/4, 3.78 | 1/4, 4.37 |
 
-Condition monitoring pays off only if the bearing can be replaced within about 2 days of the alarm. The AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
+Condition monitoring pays off only if the bearing can be replaced within about 2 days of the alarm. At the default thresholds the AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
 
-### 6.2 Predicting hours left (RUL): tried, not reliable with 4 failures
+### 6.2 Robustness checks
+
+[pipeline/maintenance_checks.py](pipeline/maintenance_checks.py) tests the results above against the obvious objections (`maintenance_check_*.csv`):
+
+| Check | Result |
+| --- | --- |
+| Is set 1 B3's early AI alarm cross-talk from B4? | No. B3's autoencoder error is driven by kurtosis, peak and crest (its own impacts); B4's by roller and cage envelope lines. B3's roller-fault evidence stays at 0.07. |
+| Thresholds were tuned on these bearings: re-score over 27 settings (K = 6/8/10, physics floor 0.10/0.15/0.20, AI floor 0.4/0.5/0.6) | Physics OR AI catches 4/4 in **27/27** settings, cost 0.81-1.08. AI alone: 3/4 in all, 1.60-1.61. Physics alone: 4/4 in only 9/27 (floor 0.10), cost 0.81-2.03. |
+| Leave one test out (preventive re-tuned on the other two) | Condition-based beats reactive (3.95-7.57) and preventive (1.21-3.54) in every case. Physics OR AI costs 0.59-1.06, but it is not always the cheapest alarm rule: with set 3 held out, AI alone costs 0.79. |
+| False alarm costs more than a planned job | Physics OR AI stays cheapest up to a needless replacement of about 4× a planned one; above that, AI alone (no false alarms) is cheaper (1.61 vs 1.91 at 5×). |
+
+**What this means:** the AI alarm's value is as **insurance**. With a slightly lower physics floor (0.10), physics alone also catches all four, but a factory cannot tune that floor on failures it has not seen yet; acting on either alarm catches all four whichever threshold is chosen. Which single alarm rule is cheapest depends on the data subset and on how expensive false alarms are, so we do not claim a winner among the condition-based rules, only that acting on either alarm is never far from the best and always beats reactive and preventive.
+
+### 6.3 Predicting hours left (RUL): tried, not reliable with 4 failures
 
 [pipeline/rul.py](pipeline/rul.py) predicts RUL in hours, capped at 100 h, evaluated **leave-one-run-out** over the four failed bearings:
 
@@ -317,6 +331,7 @@ python pipeline/dl_diagnosis.py      # ~70 min on CPU → dl_*.csv, dl_*.png
 python pipeline/rul.py               # → rul_metrics.csv, rul_predictions.csv, figures
 python pipeline/rul_bound.py         # ~1 min → rul_bound_*.csv/png (negative-result experiment)
 python pipeline/maintenance.py       # seconds → maintenance_*.csv, maintenance_strategies.png
+python pipeline/maintenance_checks.py  # ~1 min → maintenance_check_*.csv
 ```
 
 `diagnosis.py` needs `features.py` and `diag_features.py` to have run first; `dl_diagnosis.py` also needs `diagnosis.py`'s inputs and `dl_spectra.py`.
@@ -325,7 +340,7 @@ python pipeline/maintenance.py       # seconds → maintenance_*.csv, maintenanc
 
 ## 8. Limitations
 
-- **Only 4 failures.** All thresholds (8 robust SD, 0.15 contrast floor, FEI 1, autoencoder floor 0.5, CNN "unspecified" 0.3) were chosen on this same data. Treat the numbers as a case study, not a validated accuracy.
+- **Only 4 failures.** All thresholds (8 robust SD, 0.15 contrast floor, FEI 1, autoencoder floor 0.5, CNN "unspecified" 0.3) were chosen on this same data. Treat the numbers as a case study, not a validated accuracy. For Part II, the strategy result was re-scored over 27 threshold settings and still catches 4/4 in all of them (section 6.2).
 - **False alarms.** 2 of 8 healthy bearings alarm in Stage A. One comes during the neighbour's final breakdown and inherits its fault label.
 - **Late inner-race evidence.** Set 1 B3's rhythm appears only in the last ~12 h.
 - **Constant speed assumed per snapshot.** The speed search handles a constant offset; a variable-speed machine would need a tachometer and order tracking.
