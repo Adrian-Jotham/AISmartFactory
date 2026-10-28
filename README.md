@@ -44,7 +44,7 @@ NasaDataset/
 ├── fault_diagnosis_explained.md           ← Part I explained simply (Feynman style, with figures)
 ├── fault_diagnosis_part1_short.pptx       ← 11-slide Part I presentation
 ├── fault_diagnosis_presentation.pptx      ← 22-slide full deck (Part I + deep-learning variant)
-├── predictive_maintenance_part2.pptx      ← 8-slide Part II presentation (maintenance decisions)
+├── predictive_maintenance_part2.pptx      ← 10-slide Part II presentation (maintenance strategies)
 ├── 1st_test/ 2nd_test/ 3rd_test/          ← raw data (not in git, ~6 GB, see Setup)
 └── pipeline/
     ├── common.py          shared loading, dead-snapshot removal, failed-run list
