@@ -55,6 +55,7 @@ NasaDataset/
     ├── dl_spectra.py      deep-learning variant: envelope spectra as network input
     ├── dl_diagnosis.py    deep-learning variant: autoencoder + CNNs
     ├── rul.py             Part II: RUL models
+    ├── maintenance.py     Part II: when to plan maintenance (Part I alarm + conformal RUL bound)
     └── outputs/           all CSVs and figures (the .npy arrays are not in git)
 ```
 
@@ -252,7 +253,21 @@ RMSE (Root Mean Square Error) over the last 100 h of each run, in hours:
 | Set 2 B1 | Outer race | 25.7 | 42.9 |
 | Set 3 B3 | Outer race | 19.1 | 41.5 |
 
-Planned link to Part I: start RUL prediction at the Stage A alarm, and use the Stage B fault type to choose a degradation model.
+### 6.1 Maintenance decision
+
+[pipeline/maintenance.py](pipeline/maintenance.py) turns the `gbm` RUL into an action. A one-sided conformal bound (`RUL_low = prediction − 90th percentile of calibration errors`, calibrated by nested leave-one-run-out) guards against the dangerous error, overestimating RUL. Maintenance is planned once `RUL_low` < 24 h, but only after the Part I Stage A alarm: Part I says "it is failing", Part II says "act now".
+
+| Decision rule | Failures planned ≥ 24 h ahead | Healthy bearings sent a crew |
+| --- | --- | --- |
+| gbm point prediction < 24 h | 2 / 4 | 3 / 8 |
+| Conformal bound < 24 h | 3 / 4 | 7 / 8 |
+| **Conformal bound < 24 h, gated by Part I alarm** | **3 / 4** | **2 / 8** |
+
+The bound rescues set 2 B1 (planned 67 h ahead instead of 7 h) and set 1 B3 (10 h instead of missed; its fault is visible only in the last ~12 h). The gate removes the bound's false alarms; the two left are Stage A's own. Bound coverage is 98-100% on three runs but 52% on set 1 B3, so with 4 runs the 90% guarantee is approximate.
+
+![Maintenance decisions per failed bearing](pipeline/outputs/maintenance_decisions.png)
+
+A zero-shot time-series foundation model (Chronos-2) was also tried for RUL on set 2 B1: it forecasts the health index levelling off instead of accelerating, and was worse than both baselines (RMSE 56 h vs 25 h for `gbm`), so it is not used.
 
 ---
 
@@ -276,6 +291,7 @@ python pipeline/dl_diagnosis.py      # ~70 min on CPU → dl_*.csv, dl_*.png
 
 # Part II
 python pipeline/rul.py               # → rul_metrics.csv, rul_predictions.csv, figures
+python pipeline/maintenance.py       # ~1 min → maintenance_summary.csv, maintenance_decisions.png
 ```
 
 `diagnosis.py` needs `features.py` and `diag_features.py` to have run first; `dl_diagnosis.py` also needs `diagnosis.py`'s inputs and `dl_spectra.py`.
