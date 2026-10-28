@@ -1,22 +1,27 @@
-"""Part II decision layer: when to plan maintenance.
+"""Part II: which maintenance strategy should the factory use?
 
-Combines Part I and the gbm RUL model from rul.py:
-  1. gbm predicts RUL (hours, capped at --cap).
-  2. Conformal lower bound: RUL_low = pred - q, where q is the --alpha quantile
-     of calibration residuals (pred - true). Overestimating RUL is the
-     dangerous error, so the bound is one-sided.
-  3. Gate: maintenance can only be planned after the Part I Stage A alarm
-     (diag_summary.csv). Part I says "it is failing", Part II says "act now".
-  4. PLAN maintenance once RUL_low < --lead hours (parts + crew lead time).
+Every strategy is replayed on the same 12 IMS bearings (4 failed, 8 healthy
+until their test ended) and scored by cost per 1,000 operating hours:
 
-Evaluation is leave-one-run-out over the 4 failed bearings. Calibration for a
-held-out run is nested leave-one-out over its 3 training runs (train on 2,
-residuals on the 3rd), so the held-out run never touches the bound. Healthy
-bearings use gbm trained on all 4 runs and q from the 4 outer LORO residuals.
+  reactive      run to failure, repair after the breakdown
+  preventive    replace every T hours (T tuned on this same data: optimistic)
+  physics       condition-based, Part I Stage A alarm (diag_summary.csv)
+  AI            condition-based, autoencoder alarm (dl_summary.csv, no labels)
+  physics OR AI condition-based, whichever alarm fires first
+  oracle        replace each failing bearing just in time (lower bound)
 
-Usage:  python pipeline/maintenance.py [--cap 100] [--lead 24] [--alpha 0.9]
-Needs:  features.py, diag_features.py, diagnosis.py (diag_summary.csv)
-Outputs: pipeline/outputs/maintenance_summary.csv, maintenance_decisions.png
+Condition-based: the crew replaces the bearing --lead hours after the alarm
+(parts + scheduling). If it breaks first, that is a breakdown. An alarm on a
+healthy bearing is a needless replacement.
+
+Costs: planned replacement = 1, breakdown = --ratio (downtime, secondary
+damage, rush parts). Cost rate = total cost / total hours run, the usual
+renewal-reward estimate with each bearing as one cycle.
+
+Usage:  python pipeline/maintenance.py [--lead 24] [--ratio 10]
+Needs:  diagnosis.py and dl_diagnosis.py outputs
+Outputs: pipeline/outputs/maintenance_strategies.csv, maintenance_cost_curve.csv,
+         maintenance_lead_sweep.csv, maintenance_strategies.png
 """
 import argparse
 
@@ -27,122 +32,140 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from common import FAILED_RUNS, OUT_DIR
-from rul import build_run, feature_cols, fit_gbm, style_axes
+from common import OUT_DIR
+from rul import style_axes
 
-COLORS = {"true": "#52514e", "gbm": "#2a78d6", "low": "#7b4fd6",
-          "gate": "#efeee9", "lead": "#d03b3b"}
+TEST_END_H = {1: 827.6, 2: 163.5, 3: 1073.1}   # last live snapshot of each test
+T_GRID = np.arange(24, 1100, 4)                # preventive intervals searched
+LEADS = (4, 8, 12, 24, 48, 72)                 # crew lead times swept (h)
+RATIOS = np.array([1.5, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100])
+COLORS = {"reactive": "#d64545", "preventive": "#8a9a9b", "physics": "#1f8a8a",
+          "AI": "#7b4fd6", "physics OR AI": "#f26b4f", "oracle": "#12262b"}
 
 
-def first_plan(rul_est, hours_left, lead, gate_h=np.inf):
-    """Hours before the end when PLAN first fires; 0 if it never does."""
-    hit = np.flatnonzero((rul_est < lead) & (hours_left <= gate_h))
-    return float(hours_left[hit[0]]) if hit.size else 0.0
+def outcome(end, failed, warn, lead, cf, cp=1.0):
+    """(cost, hours run) for one bearing under a condition-based rule.
+
+    end: hours the bearing ran in the test; warn: alarm, hours before `end`
+    (nan = never alarmed)."""
+    if np.isnan(warn):
+        return (cf if failed else 0.0), end
+    act = end - warn + lead                      # crew arrives
+    if failed and act > end:
+        return cf, end                           # broke before the crew came
+    return cp, min(act, end)
+
+
+def age_replacement(end, failed, T, cf, cp=1.0):
+    if end > T:
+        return cp, T
+    return (cf if failed else 0.0), end
+
+
+def rate(pairs):
+    cost, hours = np.array(pairs).sum(0)
+    return 1000 * cost / hours
+
+
+def selfcheck():
+    assert outcome(100, True, np.nan, 24, 10) == (10, 100)      # no alarm: breakdown
+    assert outcome(100, True, 50, 24, 10) == (1, 74)            # caught, 26 h of life wasted
+    assert outcome(100, True, 10, 24, 10) == (10, 100)          # alarm too late
+    assert outcome(100, False, 5, 24, 10) == (1, 100)           # false alarm still costs a crew
+    assert age_replacement(100, True, 80, 10) == (1, 80)
+    assert age_replacement(100, False, 120, 10) == (0, 100)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--cap", type=float, default=100.0, help="RUL cap in hours")
-    ap.add_argument("--lead", type=float, default=24.0,
-                    help="maintenance lead time in hours (plan when RUL_low < lead)")
-    ap.add_argument("--alpha", type=float, default=0.9,
-                    help="target coverage of the conformal lower bound")
+    ap.add_argument("--lead", type=float, default=24.0, help="hours from alarm to replacement")
+    ap.add_argument("--ratio", type=float, default=10.0, help="breakdown cost / planned cost")
     args = ap.parse_args()
-    cap, lead, alpha = args.cap, args.lead, args.alpha
+    selfcheck()
 
-    diag = pd.read_csv(OUT_DIR / "diag_summary.csv").set_index(["set", "bearing"])
-    alarm_h = diag["alarm_h_before_end"].fillna(-1.0)   # -1: no alarm, gate never opens
-    runs = {(s, b): build_run(s, b, cap) for s, b, _ in FAILED_RUNS}
-    modes = {(s, b): m for s, b, m in FAILED_RUNS}
+    b = pd.read_csv(OUT_DIR / "dl_summary.csv")[["set", "bearing", "truth", "stageA_alarm_h", "ae_alarm_h"]]
+    b["failed"] = b["truth"] != "healthy"
+    b["end_h"] = b["set"].map(TEST_END_H)
+    triggers = {"physics": b["stageA_alarm_h"].to_numpy(float),
+                "AI": b["ae_alarm_h"].to_numpy(float)}
+    triggers["physics OR AI"] = np.fmax(triggers["physics"], triggers["AI"])  # earliest alarm
+    end, failed = b["end_h"].to_numpy(), b["failed"].to_numpy()
 
-    def predict(train_keys, df):
-        model = fit_gbm(pd.concat([runs[k] for k in train_keys], ignore_index=True), cap)
-        return np.clip(model.predict(df[feature_cols(df)]), 0, cap)
+    def cost_rates(cf, lead):
+        out = {"reactive": rate([(cf if f else 0.0, e) for e, f in zip(end, failed)])}
+        prev = [rate([age_replacement(e, f, T, cf) for e, f in zip(end, failed)]) for T in T_GRID]
+        out["preventive"] = min(prev)
+        out["preventive_T"] = T_GRID[int(np.argmin(prev))]
+        for name, w in triggers.items():
+            out[name] = rate([outcome(e, f, x, lead, cf) for e, f, x in zip(end, failed, w)])
+        out["oracle"] = rate([(1.0 if f else 0.0, e) for e, f in zip(end, failed)])
+        return out
 
-    def residuals(pred, df):
-        m = df["rul_true"].to_numpy() <= cap
-        return pred[m] - df["rul_true"].to_numpy()[m]
+    # Per-strategy outcome table at the chosen lead and ratio
+    base = cost_rates(args.ratio, args.lead)
+    rows = [{"strategy": "reactive", "failures_caught": 0, "breakdowns": int(failed.sum()),
+             "needless_replacements": 0, "mean_life_wasted_h": 0.0},
+            {"strategy": f"preventive (every {base['preventive_T']} h)"}]
+    T = base["preventive_T"]
+    rows[1].update(failures_caught=int((failed & (end > T)).sum()),
+                   breakdowns=int((failed & (end <= T)).sum()),
+                   needless_replacements=int((~failed & (end > T)).sum()),
+                   mean_life_wasted_h=float(np.mean((end - T)[failed & (end > T)]))
+                   if (failed & (end > T)).any() else 0.0)
+    for name, w in triggers.items():
+        caught = failed & (w >= args.lead)
+        rows.append({"strategy": name, "failures_caught": int(caught.sum()),
+                     "breakdowns": int(failed.sum() - caught.sum()),
+                     "needless_replacements": int((~failed & ~np.isnan(w)).sum()),
+                     "mean_life_wasted_h": float(np.mean(w[caught] - args.lead)) if caught.any() else 0.0})
+    rows.append({"strategy": "oracle", "failures_caught": int(failed.sum()), "breakdowns": 0,
+                 "needless_replacements": 0, "mean_life_wasted_h": 0.0})
+    keys = ["reactive", "preventive", *triggers, "oracle"]
+    for r, k in zip(rows, keys):
+        r[f"cost_per_1000h(ratio={args.ratio:g})"] = base[k]
+    table = pd.DataFrame(rows)
+    table.to_csv(OUT_DIR / "maintenance_strategies.csv", index=False)
+    print(f"Lead time {args.lead:g} h, breakdown costs {args.ratio:g}x a planned replacement:")
+    print(table.round(2).to_string(index=False))
 
-    rows, curves, outer_resid = [], {}, []
-    for key, test in runs.items():
-        train = [k for k in runs if k != key]
-        cal = [residuals(predict([k for k in train if k != c], runs[c]), runs[c])
-               for c in train]
-        q = np.quantile(np.concatenate(cal), alpha)
+    # Cost rate vs breakdown cost ratio
+    curve = pd.DataFrame([{"ratio": r, **cost_rates(r, args.lead)} for r in RATIOS])
+    curve.to_csv(OUT_DIR / "maintenance_cost_curve.csv", index=False)
+    print("\nCost per 1,000 h vs breakdown cost ratio:")
+    print(curve.round(2).to_string(index=False))
 
-        pred = predict(train, test)
-        outer_resid.append(residuals(pred, test))
-        low = np.clip(pred - q, 0, cap)
-        y = test["rul_true"].to_numpy()
-        m = y <= cap
-        curves[key] = (test, pred, low)
-        rows.append({"set": key[0], "bearing": key[1], "truth": modes[key],
-                     "alarm_h_before_end": diag.loc[key, "alarm_h_before_end"],
-                     "margin_h": q, "coverage": (y[m] >= low[m]).mean(),
-                     "plan_gbm_h": first_plan(pred, y, lead),
-                     "plan_conformal_h": first_plan(low, y, lead),
-                     "plan_gated_h": first_plan(low, y, lead, alarm_h[key])})
+    # How fast must the crew act? Failures caught and cost vs lead time
+    sweep = []
+    for L in LEADS:
+        c = cost_rates(args.ratio, L)
+        for name, w in triggers.items():
+            sweep.append({"lead_h": L, "strategy": name,
+                          "failures_caught": int((failed & (w >= L)).sum()),
+                          f"cost_per_1000h(ratio={args.ratio:g})": c[name]})
+    sweep = pd.DataFrame(sweep)
+    sweep.to_csv(OUT_DIR / "maintenance_lead_sweep.csv", index=False)
+    print("\nLead-time sweep (condition-based strategies):")
+    print(sweep.round(2).to_string(index=False))
 
-    # Healthy bearings: would the decision layer send a crew to a good bearing?
-    q_all = np.quantile(np.concatenate(outer_resid), alpha)
-    for key in diag.index[diag["truth"] == "healthy"]:
-        df = build_run(*key, cap)
-        pred = predict(list(runs), df)
-        low = np.clip(pred - q_all, 0, cap)
-        y = df["rul_true"].to_numpy()        # hours before the end of the test
-        rows.append({"set": key[0], "bearing": key[1], "truth": "healthy",
-                     "alarm_h_before_end": diag.loc[key, "alarm_h_before_end"],
-                     "margin_h": q_all, "coverage": np.nan,
-                     "plan_gbm_h": first_plan(pred, y, lead),
-                     "plan_conformal_h": first_plan(low, y, lead),
-                     "plan_gated_h": first_plan(low, y, lead, alarm_h[key])})
-
-    summ = pd.DataFrame(rows)
-    summ.to_csv(OUT_DIR / "maintenance_summary.csv", index=False)
-    f, h = summ[summ["truth"] != "healthy"], summ[summ["truth"] == "healthy"]
-    print(f"PLAN when RUL lower bound < {lead:g} h; target coverage {alpha:.0%}.")
-    print("plan_*_h = hours before the end when PLAN first fires (0 = never).")
-    print(summ.round(2).to_string(index=False))
-    for col in ("plan_gbm_h", "plan_conformal_h", "plan_gated_h"):
-        msg = f"{col:17s} failed planned >= {lead:g} h ahead: {(f[col] >= lead).sum()}/4"
-        if h[col].notna().all():
-            msg += f"   healthy bearings with a PLAN: {(h[col] > 0).sum()}/{len(h)}"
-        print(msg)
-
-    # Figure: one panel per failed run
-    fig, axes = plt.subplots(2, 2, figsize=(12, 7.5))
-    for ax, (key, (df, pred, low)) in zip(axes.flat, curves.items()):
-        y = df["rul_true"].to_numpy()
-        win = y <= 2 * cap
-        x = -y[win]
-        a = diag.loc[key, "alarm_h_before_end"]
-        ax.axvspan(-a, 0, color=COLORS["gate"], label="After Part I alarm")
-        ax.axhline(lead, color=COLORS["lead"], linestyle=":", linewidth=1,
-                   label=f"Lead time ({lead:g} h)")
-        ax.plot(x, np.minimum(y, cap)[win], color=COLORS["true"], linestyle="--",
-                linewidth=1.6, label=f"True RUL (capped at {cap:g} h)")
-        ax.plot(x, pred[win], color=COLORS["gbm"], linewidth=1.2, label="Gradient boosting")
-        ax.plot(x, low[win], color=COLORS["low"], linewidth=1.6,
-                label=f"Conformal lower bound ({alpha:.0%})")
-        t_plan = first_plan(low, y, lead, a)
-        if t_plan > 0:
-            ax.axvline(-t_plan, color=COLORS["low"], linewidth=1)
-            ax.annotate(f"PLAN {t_plan:.0f} h ahead", (-t_plan, cap * 0.92),
-                        xytext=(4, 0), textcoords="offset points",
-                        fontsize=8, color=COLORS["low"])
-        ax.set_title(f"Set {key[0]} bearing {key[1]} ({modes[key]})", fontsize=10,
-                     loc="left", color="#0b0b0b")
-        ax.set_xlabel("Hours before failure", color="#0b0b0b")
-        ax.set_ylabel("RUL (h)", color="#0b0b0b")
-        style_axes(ax)
-    axes[0, 0].legend(frameon=False, fontsize=7.5, loc="lower left")
-    fig.suptitle("When to plan maintenance: Part I alarm gates a conformal RUL bound "
-                 "(each run held out)", fontsize=11, x=0.01, ha="left", color="#0b0b0b")
+    fig, ax = plt.subplots(figsize=(9, 5))
+    for k in keys:
+        ax.plot(curve["ratio"], curve[k], color=COLORS[k], linewidth=2.2 if k == "physics OR AI" else 1.6,
+                linestyle="--" if k == "oracle" else "-", label=k)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_xticks(RATIOS[[0, 2, 3, 5, 7, 9, 11]], labels=[f"{r:g}x" for r in RATIOS[[0, 2, 3, 5, 7, 9, 11]]])
+    ax.set_xlabel("Breakdown cost / planned replacement cost", color="#0b0b0b")
+    ax.set_ylabel("Cost per 1,000 operating hours", color="#0b0b0b")
+    ax.set_title(f"Maintenance strategies on the 12 IMS bearings (lead time {args.lead:g} h)",
+                 fontsize=10, loc="left", color="#0b0b0b")
+    style_axes(ax)
+    ax.legend(frameon=False, fontsize=9)
     fig.tight_layout()
-    fig.savefig(OUT_DIR / "maintenance_decisions.png", dpi=130, facecolor="#fcfcfb")
+    fig.savefig(OUT_DIR / "maintenance_strategies.png", dpi=130, facecolor="#fcfcfb")
     plt.close(fig)
-    print(f"wrote maintenance_summary.csv and maintenance_decisions.png to {OUT_DIR}")
+    print(f"wrote maintenance_strategies.csv, maintenance_cost_curve.csv, "
+          f"maintenance_lead_sweep.csv, maintenance_strategies.png to {OUT_DIR}")
 
 
 if __name__ == "__main__":

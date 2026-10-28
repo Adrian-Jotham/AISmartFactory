@@ -1,0 +1,11 @@
+lead_h,rule,failures_in_time,mean_wasted_life_h,healthy_flagged
+4,act at alarm,4,53.650000000000006,2
+4,alarm + RUL bound,3,61.23888888888882,2
+8,act at alarm,4,49.650000000000006,2
+8,alarm + RUL bound,3,57.79444444444439,2
+12,act at alarm,3,60.96666666666666,2
+12,alarm + RUL bound,3,56.127777777777716,2
+24,act at alarm,3,48.96666666666667,2
+24,alarm + RUL bound,3,48.07222222222216,2
+48,act at alarm,3,24.96666666666667,2
+48,alarm + RUL bound,3,24.90555555555549,2

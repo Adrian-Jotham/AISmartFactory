@@ -13,7 +13,7 @@ Team course project on fault diagnosis (Part I) and predictive maintenance (Part
 3. [Setup](#3-setup)
 4. [Part I: fault diagnosis](#4-part-i-fault-diagnosis)
 5. [Optional: deep-learning variant](#5-optional-deep-learning-variant)
-6. [Part II: predictive maintenance (RUL)](#6-part-ii-predictive-maintenance-rul)
+6. [Part II: predictive maintenance](#6-part-ii-predictive-maintenance)
 7. [How to reproduce everything](#7-how-to-reproduce-everything)
 8. [Limitations](#8-limitations)
 9. [Abbreviations](#9-abbreviations)
@@ -24,11 +24,11 @@ Team course project on fault diagnosis (Part I) and predictive maintenance (Part
 
 | | Part I: Fault diagnosis | Part II: Predictive maintenance |
 | --- | --- | --- |
-| Question | When did a bearing start failing, which one, and what part is damaged? | How long until it fails (RUL, Remaining Useful Life)? |
-| Approach | Signal processing + robust statistics, no training | Health indicator extrapolation and gradient-boosted trees |
-| Labels needed | None | Run-to-failure histories (leave-one-run-out) |
-| Main scripts | `diag_features.py`, `diagnosis.py` | `rul.py` |
-| Status | Done, evaluated on all 12 bearings | Baseline done |
+| Question | When did a bearing start failing, which one, and what part is damaged? | Which maintenance strategy, and what does condition monitoring buy? |
+| Approach | Signal processing + robust statistics, no training | Strategy comparison: reactive, preventive, condition-based (physics / AI) |
+| Labels needed | None | None for the strategies; run-to-failure histories for the RUL attempts |
+| Main scripts | `diag_features.py`, `diagnosis.py` | `maintenance.py` (+ `rul.py`, `rul_bound.py`) |
+| Status | Done, evaluated on all 12 bearings | Done, evaluated on all 12 bearings |
 
 Course brief: [guide.txt](guide.txt). Part I does not require AI/ML; practical implementation on a dataset counts toward "Technical Depth & Application".
 
@@ -56,7 +56,8 @@ NasaDataset/
     ├── dl_spectra.py      deep-learning variant: envelope spectra as network input
     ├── dl_diagnosis.py    deep-learning variant: autoencoder + CNNs
     ├── rul.py             Part II: RUL models
-    ├── maintenance.py     Part II: when to plan maintenance (Part I alarm + conformal RUL bound)
+    ├── maintenance.py     Part II: maintenance strategy comparison (cost, lead-time sweep)
+    ├── rul_bound.py       Part II experiment: conformal RUL bound vs act-at-alarm (negative result)
     └── outputs/           all CSVs and figures (the .npy arrays are not in git)
 ```
 
@@ -236,9 +237,42 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 
 ---
 
-## 6. Part II: predictive maintenance (RUL)
+## 6. Part II: predictive maintenance
 
-[pipeline/rul.py](pipeline/rul.py) predicts RUL in hours, capped at 100 h (a healthy bearing looks the same 500 h or 100 h before failure). It is evaluated **leave-one-run-out** over the four failed bearings:
+**Question:** which maintenance strategy should a factory run on these bearings, and what does condition monitoring (physics and AI) buy over the classic options?
+
+### 6.1 Strategy comparison
+
+[pipeline/maintenance.py](pipeline/maintenance.py) replays six strategies on the same 12 bearings and scores them by cost per 1,000 operating hours (planned replacement = 1, breakdown = 10; renewal-reward estimate, each bearing one cycle). Condition-based strategies replace the bearing 24 h (lead time) after their alarm; if it breaks first, that counts as a breakdown, and an alarm on a healthy bearing counts as a needless replacement.
+
+| Strategy | Failures caught | Breakdowns | Needless replacements | Life wasted per catch | Cost / 1,000 h |
+| --- | --- | --- | --- | --- | --- |
+| Reactive (run to failure) | 0 | 4 | 0 | 0 h | 4.84 |
+| Preventive, every 824 h* | 3 | 1 | 5 | 85 h | 2.48 |
+| Condition-based, physics alarm (Part I Stage A) | 3 | 1 | 2 | 49 h | 2.03 |
+| Condition-based, AI alarm (Part I autoencoder D1) | 3 | 1 | 0 | 57 h | 1.61 |
+| Condition-based, physics OR AI | **4** | **0** | 2 | 54 h | **0.82** |
+| Oracle (replace just in time) | 4 | 0 | 0 | 0 h | 0.48 |
+
+\*The best fixed interval chosen **with hindsight** on this data (it sits just before set 1 ends), so preventive is shown at its most optimistic.
+
+**Why OR works:** the two detectors fail on different bearings. The autoencoder warns about set 1 B3 (inner race) 71 h ahead, where the physics alarm gives only 12 h; the physics alarm catches set 3 B3, which the autoencoder misses. Both detectors' thresholds were set on these same 12 bearings, so read this as complementarity on a case study, not a tuned optimum.
+
+![Cost per 1,000 h vs breakdown cost](pipeline/outputs/maintenance_strategies.png)
+
+**Lead time (how fast the crew must act), breakdown cost 10:**
+
+| Lead time | Physics | AI | Physics OR AI |
+| --- | --- | --- | --- |
+| 4-8 h | 4/4 caught, 0.82 | 3/4, 1.62 | 4/4, 0.83 |
+| 12-48 h | 3/4, 2.0 | 3/4, 1.6 | **4/4, 0.8** |
+| 72 h | 1/4, 4.36 | 1/4, 3.78 | 1/4, 4.37 |
+
+Condition monitoring pays off only if the bearing can be replaced within about 2 days of the alarm. The AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
+
+### 6.2 Predicting hours left (RUL): tried, not reliable with 4 failures
+
+[pipeline/rul.py](pipeline/rul.py) predicts RUL in hours, capped at 100 h, evaluated **leave-one-run-out** over the four failed bearings:
 
 | Model | Idea |
 | --- | --- |
@@ -254,21 +288,10 @@ RMSE (Root Mean Square Error) over the last 100 h of each run, in hours:
 | Set 2 B1 | Outer race | 25.7 | 42.9 |
 | Set 3 B3 | Outer race | 19.1 | 41.5 |
 
-### 6.1 Maintenance decision
+Two attempts to turn RUL into better maintenance timing failed, and are kept as findings:
 
-[pipeline/maintenance.py](pipeline/maintenance.py) turns the `gbm` RUL into an action. A one-sided conformal bound (`RUL_low = prediction − 90th percentile of calibration errors`, calibrated by nested leave-one-run-out) guards against the dangerous error, overestimating RUL. Maintenance is planned once `RUL_low` < 24 h, but only after the Part I Stage A alarm: Part I says "it is failing", Part II says "act now".
-
-| Decision rule | Failures planned ≥ 24 h ahead | Healthy bearings sent a crew |
-| --- | --- | --- |
-| gbm point prediction < 24 h | 2 / 4 | 3 / 8 |
-| Conformal bound < 24 h | 3 / 4 | 7 / 8 |
-| **Conformal bound < 24 h, gated by Part I alarm** | **3 / 4** | **2 / 8** |
-
-The bound rescues set 2 B1 (planned 67 h ahead instead of 7 h) and set 1 B3 (10 h instead of missed; its fault is visible only in the last ~12 h). The gate removes the bound's false alarms; the two left are Stage A's own. Bound coverage is 98-100% on three runs but 52% on set 1 B3, so with 4 runs the 90% guarantee is approximate.
-
-![Maintenance decisions per failed bearing](pipeline/outputs/maintenance_decisions.png)
-
-A zero-shot time-series foundation model (Chronos-2) was also tried for RUL on set 2 B1: it forecasts the health index levelling off instead of accelerating, and was worse than both baselines (RMSE 56 h vs 25 h for `gbm`), so it is not used.
+- **Calibrated RUL bound** ([pipeline/rul_bound.py](pipeline/rul_bound.py)): a one-sided conformal lower bound on `gbm` (nested leave-one-run-out). Its honest margin is 17-59 h, as wide as the lead time, so after the Part I alarm it fires immediately; across lead times 4-48 h it never beats "act at the alarm" (`rul_bound_sweep.csv`). The data explains why: after the alarm the four bearings lasted 12, 53, 70 and 97 h, too spread for 3 training examples to predict.
+- **Zero-shot foundation model** (Chronos-2) on set 2 B1: it forecasts the health index levelling off instead of accelerating, and was worse than both baselines (RMSE 56 h vs 25 h for `gbm`).
 
 ---
 
@@ -292,7 +315,8 @@ python pipeline/dl_diagnosis.py      # ~70 min on CPU → dl_*.csv, dl_*.png
 
 # Part II
 python pipeline/rul.py               # → rul_metrics.csv, rul_predictions.csv, figures
-python pipeline/maintenance.py       # ~1 min → maintenance_summary.csv, maintenance_decisions.png
+python pipeline/rul_bound.py         # ~1 min → rul_bound_*.csv/png (negative-result experiment)
+python pipeline/maintenance.py       # seconds → maintenance_*.csv, maintenance_strategies.png
 ```
 
 `diagnosis.py` needs `features.py` and `diag_features.py` to have run first; `dl_diagnosis.py` also needs `diagnosis.py`'s inputs and `dl_spectra.py`.
