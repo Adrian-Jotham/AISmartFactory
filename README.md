@@ -84,10 +84,12 @@ Tested with Python 3.13 on Linux (CPU only):
 
 ```bash
 pip install numpy scipy pandas scikit-learn matplotlib   # Parts I and II
-pip install torch                                        # only for the deep-learning variant
+pip install torch                                        # deep-learning variant and maintenance_checks.py
 ```
 
 Versions used: NumPy 2.3, SciPy 1.17, pandas 3.0, scikit-learn 1.9, Matplotlib 3.10, PyTorch 2.11.
+
+The Part II scripts (`rul_bound.py`, `maintenance.py`, `maintenance_checks.py`) were run with Python 3.10 on Windows, with NumPy 2.2, pandas 2.2, scikit-learn 1.4 and PyTorch 2.10. Gradient-boosting results shift slightly between scikit-learn versions (set 1 B3 RMSE 37.3 h with 1.9, 39.7 h with 1.4); the conclusions do not change.
 
 ---
 
@@ -244,7 +246,7 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 
 ### 6.1 Strategy comparison
 
-[pipeline/maintenance.py](pipeline/maintenance.py) replays six strategies on the same 12 bearings and scores them by cost per 1,000 operating hours (planned replacement = 1, breakdown = 10; renewal-reward estimate, each bearing one cycle). Condition-based strategies replace the bearing 24 h (lead time) after their alarm; if it breaks first, that counts as a breakdown, and an alarm on a healthy bearing counts as a needless replacement.
+[pipeline/maintenance.py](pipeline/maintenance.py) replays six strategies on the same 12 bearings and scores them by cost per 1,000 operating hours (planned replacement = 1, breakdown = 10; renewal-reward estimate, each bearing one cycle). Condition-based strategies replace the bearing 24 h (lead time) after their alarm; if it breaks first, that counts as a breakdown, and an alarm on a healthy bearing counts as a needless replacement. A needless replacement is charged even when the test ends before the crew would arrive (set 2 B4 alarms 3.7 h before the end), which counts against condition-based maintenance.
 
 | Strategy | Failures caught | Breakdowns | Needless replacements | Life wasted per catch | Cost / 1,000 h |
 | --- | --- | --- | --- | --- | --- |
@@ -257,7 +259,7 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 
 \*The best fixed interval chosen **with hindsight** on this data (it sits just before set 1 ends), so preventive is shown at its most optimistic.
 
-**Why OR works:** at the default thresholds the two detectors fail on different bearings. The autoencoder warns about set 1 B3 (inner race) 71 h ahead, where the physics alarm gives only 12 h; the physics alarm catches set 3 B3, which the autoencoder misses. Set 1 B3's early AI alarm is its own impact signal (kurtosis, peak, crest), not cross-talk from its failing neighbour B4 (see 6.2).
+**Why OR works:** at the default thresholds each detector is late or silent on a different bearing. The autoencoder warns about set 1 B3 (inner race) 71 h ahead, where the physics alarm gives only 12 h; the physics alarm catches set 3 B3, which the autoencoder misses. Set 1 B3's early AI alarm comes mainly from its own impact signal (kurtosis, peak-to-peak, peak, crest), not from its failing neighbour B4 (see 6.2).
 
 ![Cost per 1,000 h vs breakdown cost](pipeline/outputs/maintenance_strategies.png)
 
@@ -269,7 +271,7 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 | 12-48 h | 3/4, 2.0 | 3/4, 1.6 | **4/4, 0.8** |
 | 72 h | 1/4, 4.36 | 1/4, 3.78 | 1/4, 4.37 |
 
-Condition monitoring pays off only if the bearing can be replaced within about 2 days of the alarm. At the default thresholds the AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
+Acting on either alarm catches all 4 failures only if the bearing can be replaced within about 2 days of the alarm; at 72 h every rule catches 1 of 4, although all three still cost less than reactive. At the default thresholds the AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
 
 ### 6.2 Robustness checks
 
@@ -277,12 +279,12 @@ Condition monitoring pays off only if the bearing can be replaced within about 2
 
 | Check | Result |
 | --- | --- |
-| Is set 1 B3's early AI alarm cross-talk from B4? | No. B3's autoencoder error is driven by kurtosis, peak and crest (its own impacts); B4's by roller and cage envelope lines. B3's roller-fault evidence stays at 0.07. |
-| Thresholds were tuned on these bearings: re-score over 27 settings (K = 6/8/10, physics floor 0.10/0.15/0.20, AI floor 0.4/0.5/0.6) | Physics OR AI catches 4/4 in **27/27** settings, cost 0.81-1.08. AI alone: 3/4 in all, 1.60-1.61. Physics alone: 4/4 in only 9/27 (floor 0.10), cost 0.81-2.03. |
-| Leave one test out (preventive re-tuned on the other two) | Condition-based beats reactive (3.95-7.57) and preventive (1.21-3.54) in every case. Physics OR AI costs 0.59-1.06, but it is not always the cheapest alarm rule: with set 3 held out, AI alone costs 0.79. |
+| Is set 1 B3's early AI alarm cross-talk from B4? | Mostly no. 71-12 h before the end, B3's autoencoder error rise is led by its own impact features (kurtosis +28.9, peak-to-peak +22.2, peak +17.3, crest +11.0) and its own inner-race line (+7.2); B4's roller line rises only +4.0. B4's own error is led by roller and cage envelope lines, and B3's Stage B roller evidence stays at 0.07. |
+| Thresholds were tuned on these bearings: re-score over 27 settings (K = 6/8/10, physics floor 0.10/0.15/0.20, AI floor 0.4/0.5/0.6), at lead time 24 h and breakdown 10× | Physics OR AI catches 4/4 in **27/27** settings, cost 0.81-1.08. AI alone: 3/4 in all, 1.60-1.61. Physics alone: 4/4 in only 9/27 (floor 0.10), cost 0.81-2.03. The AI floor changed nothing in this range, so the 27 settings give 9 distinct outcomes. |
+| Drop one test and re-score the other two (preventive re-tuned on them, alarm thresholds not re-tuned; a sensitivity check, not out-of-sample validation) | Physics OR AI beats reactive (3.95-7.57) and preventive (1.21-3.54) in every case, at 0.59-1.06. The single alarms do not: with set 2 dropped, preventive (1.21) beats physics (1.91) and AI (1.61). With set 3 dropped, AI alone (0.79) is the cheapest rule. |
 | False alarm costs more than a planned job | Physics OR AI stays cheapest up to a needless replacement of about 4× a planned one; above that, AI alone (no false alarms) is cheaper (1.61 vs 1.91 at 5×). |
 
-**What this means:** the AI alarm's value is as **insurance**. With a slightly lower physics floor (0.10), physics alone also catches all four, but a factory cannot tune that floor on failures it has not seen yet; acting on either alarm catches all four whichever threshold is chosen. Which single alarm rule is cheapest depends on the data subset and on how expensive false alarms are, so we do not claim a winner among the condition-based rules, only that acting on either alarm is never far from the best and always beats reactive and preventive.
+**What this means:** the AI alarm's value is as **insurance**. With a slightly lower physics floor (0.10), physics alone also catches all four, but a factory cannot tune that floor on failures it has not seen yet; acting on either alarm catches all four in every threshold setting tried. Which single alarm rule is cheapest depends on the data subset and on how expensive false alarms are, so we do not claim a winner among the condition-based rules. At lead time 24 h and breakdown cost 10×, acting on either alarm is the only rule that beats reactive and preventive in every drop-one-test case.
 
 ### 6.3 Predicting hours left (RUL): tried, not reliable with 4 failures
 
@@ -304,8 +306,8 @@ RMSE (Root Mean Square Error) over the last 100 h of each run, in hours:
 
 Two attempts to turn RUL into better maintenance timing failed, and are kept as findings:
 
-- **Calibrated RUL bound** ([pipeline/rul_bound.py](pipeline/rul_bound.py)): a one-sided conformal lower bound on `gbm` (nested leave-one-run-out). Its honest margin is 17-59 h, as wide as the lead time, so after the Part I alarm it fires immediately; across lead times 4-48 h it never beats "act at the alarm" (`rul_bound_sweep.csv`). The data explains why: after the alarm the four bearings lasted 12, 53, 70 and 97 h, too spread for 3 training examples to predict.
-- **Zero-shot foundation model** (Chronos-2) on set 2 B1: it forecasts the health index levelling off instead of accelerating, and was worse than both baselines (RMSE 56 h vs 25 h for `gbm`).
+- **Calibrated RUL bound** ([pipeline/rul_bound.py](pipeline/rul_bound.py)): a one-sided conformal lower bound on `gbm` (nested leave-one-run-out). Its margin is 17-59 h, as wide as the lead time, so after the Part I alarm it fires almost immediately, and it covered only 52% of set 1 B3's points against the 90% target. It never catches more failures than "act at the alarm": at 4-8 h lead time it catches 3 instead of 4, and at 12-48 h it catches the same 3 and saves at most about 5 h of bearing life (`rul_bound_sweep.csv`). The data explains why: after the alarm the four bearings lasted 12, 53, 70 and 97 h, too spread for 3 training examples to predict.
+- **Zero-shot foundation model** (Chronos-2 via chronos-forecasting 2.3.2; an exploratory run, not part of the pipeline) on set 2 B1: it forecasts the health index levelling off instead of accelerating, and was worse than both baselines. Scored at forecast origins every 2 h over the last 100 h, its median-forecast RMSE was 55.6 h against 25.2 h for `gbm` and 42.5 h for `hi` (over every snapshot `gbm` scores 25.7 h, as in the table above).
 
 ---
 
@@ -345,6 +347,7 @@ python pipeline/maintenance_checks.py  # ~1 min → maintenance_check_*.csv
 - **Late inner-race evidence.** Set 1 B3's rhythm appears only in the last ~12 h.
 - **Constant speed assumed per snapshot.** The speed search handles a constant offset; a variable-speed machine would need a tachometer and order tracking.
 - **Peer contrast needs peers.** It assumes several similar bearings on one machine, and it weakens if several fail at once.
+- **Bearings costed independently.** The Part II cost model treats each bearing as its own replacement cycle. On a real shaft, replacing one bearing stops the machine, and the crew may replace its neighbours in the same stop.
 
 ---
 
