@@ -44,7 +44,8 @@ NasaDataset/
 ├── fault_diagnosis_explained.md           ← Part I explained simply (Feynman style, with figures)
 ├── fault_diagnosis_part1_short.pptx       ← 11-slide Part I presentation
 ├── fault_diagnosis_presentation.pptx      ← 22-slide full deck (Part I + deep-learning variant)
-├── predictive_maintenance_part2.pptx      ← 11-slide Part II presentation (maintenance strategies)
+├── predictive_maintenance_part2.pptx      ← 12-slide Part II presentation (maintenance strategies)
+├── bearing_replay.html                    ← Part I and Part II as a seven-step story of test 2 (open in a browser)
 ├── 1st_test/ 2nd_test/ 3rd_test/          ← raw data (not in git, ~6 GB, see Setup)
 └── pipeline/
     ├── common.py          shared loading, dead-snapshot removal, failed-run list
@@ -59,6 +60,7 @@ NasaDataset/
     ├── maintenance.py     Part II: maintenance strategy comparison (cost, lead-time sweep)
     ├── rul_bound.py       Part II experiment: conformal RUL bound vs act-at-alarm (negative result)
     ├── maintenance_checks.py  Part II robustness: cross-talk, thresholds, leave-one-test-out, false-alarm cost
+    ├── replay.py          Part II: writes the data of bearing_replay.html, checked against the Part I outputs
     └── outputs/           all CSVs and figures (the .npy arrays are not in git)
 ```
 
@@ -84,12 +86,12 @@ Tested with Python 3.13 on Linux (CPU only):
 
 ```bash
 pip install numpy scipy pandas scikit-learn matplotlib   # Parts I and II
-pip install torch                                        # deep-learning variant and maintenance_checks.py
+pip install torch                                        # deep-learning variant, maintenance_checks.py, replay.py
 ```
 
 Versions used: NumPy 2.3, SciPy 1.17, pandas 3.0, scikit-learn 1.9, Matplotlib 3.10, PyTorch 2.11.
 
-The Part II scripts (`rul_bound.py`, `maintenance.py`, `maintenance_checks.py`) were run with Python 3.10 on Windows, with NumPy 2.2, pandas 2.2, scikit-learn 1.4 and PyTorch 2.10. Gradient-boosting results shift slightly between scikit-learn versions (set 1 B3 RMSE 37.3 h with 1.9, 39.7 h with 1.4); the conclusions do not change.
+The Part II scripts (`rul_bound.py`, `maintenance.py`, `maintenance_checks.py`, `replay.py`) were run with Python 3.10 on Windows, with NumPy 2.2, pandas 2.2, scikit-learn 1.4 and PyTorch 2.10. Gradient-boosting results shift slightly between scikit-learn versions (set 1 B3 RMSE 37.3 h with 1.9, 39.7 h with 1.4); the conclusions do not change.
 
 ---
 
@@ -273,6 +275,8 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 
 Acting on either alarm catches all 4 failures only if the bearing can be replaced within about 2 days of the alarm; at 72 h every rule catches 1 of 4, although all three still cost less than reactive. At the default thresholds the AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
 
+**See it happen:** [bearing_replay.html](bearing_replay.html) tells test 2 as a seven-step story for a general audience. Bearing 1's vibration rises, Part I raises the alarm (hour 94) and names an outer-race fault, and Part II's crew fits a new bearing at hour 118. The last two steps show why two detectors are used and the cost over all 12 bearings. Open it in a browser and step through with Next or the arrow keys. After hour 118 the chart keeps showing the old bearing as a grey dashed line, because in the real test nobody replaced it. [pipeline/replay.py](pipeline/replay.py) writes the page's data and checks every alarm time and verdict against `dl_summary.csv`; the page's cost model reproduces `maintenance_cost_curve.csv` and `maintenance_lead_sweep.csv`.
+
 ### 6.2 Robustness checks
 
 [pipeline/maintenance_checks.py](pipeline/maintenance_checks.py) tests the results above against the obvious objections (`maintenance_check_*.csv`):
@@ -334,6 +338,7 @@ python pipeline/rul.py               # → rul_metrics.csv, rul_predictions.csv,
 python pipeline/rul_bound.py         # ~1 min → rul_bound_*.csv/png (negative-result experiment)
 python pipeline/maintenance.py       # seconds → maintenance_*.csv, maintenance_strategies.png
 python pipeline/maintenance_checks.py  # ~1 min → maintenance_check_*.csv
+python pipeline/replay.py            # ~20 s → data block of bearing_replay.html
 ```
 
 `diagnosis.py` needs `features.py` and `diag_features.py` to have run first; `dl_diagnosis.py` also needs `diagnosis.py`'s inputs and `dl_spectra.py`.
