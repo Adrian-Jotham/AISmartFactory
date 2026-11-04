@@ -44,8 +44,7 @@ NasaDataset/
 ├── fault_diagnosis_explained.md           ← Part I explained simply (Feynman style, with figures)
 ├── fault_diagnosis_part1_short.pptx       ← 11-slide Part I presentation
 ├── fault_diagnosis_presentation.pptx      ← 22-slide full deck (Part I + deep-learning variant)
-├── predictive_maintenance_part2.pptx      ← 12-slide Part II presentation (maintenance strategies)
-├── bearing_replay.html                    ← Part I and Part II as a seven-step story of test 2 (open in a browser)
+├── predictive_maintenance_part2.pptx      ← 18-slide Part II presentation (maintenance strategies)
 ├── 1st_test/ 2nd_test/ 3rd_test/          ← raw data (not in git, ~6 GB, see Setup)
 └── pipeline/
     ├── common.py          shared loading, dead-snapshot removal, failed-run list
@@ -57,10 +56,9 @@ NasaDataset/
     ├── dl_spectra.py      deep-learning variant: envelope spectra as network input
     ├── dl_diagnosis.py    deep-learning variant: autoencoder + CNNs
     ├── rul.py             Part II: RUL models
-    ├── maintenance.py     Part II: maintenance strategy comparison (cost, lead-time sweep)
+    ├── maintenance.py     Part II: maintenance strategy comparison (cost, lead-time sweep, automatic work orders)
     ├── rul_bound.py       Part II experiment: conformal RUL bound vs act-at-alarm (negative result)
     ├── maintenance_checks.py  Part II robustness: cross-talk, thresholds, leave-one-test-out, false-alarm cost
-    ├── replay.py          Part II: writes the data of bearing_replay.html, checked against the Part I outputs
     └── outputs/           all CSVs and figures (the .npy arrays are not in git)
 ```
 
@@ -86,12 +84,12 @@ Tested with Python 3.13 on Linux (CPU only):
 
 ```bash
 pip install numpy scipy pandas scikit-learn matplotlib   # Parts I and II
-pip install torch                                        # deep-learning variant, maintenance_checks.py, replay.py
+pip install torch                                        # deep-learning variant, maintenance_checks.py
 ```
 
 Versions used: NumPy 2.3, SciPy 1.17, pandas 3.0, scikit-learn 1.9, Matplotlib 3.10, PyTorch 2.11.
 
-The Part II scripts (`rul_bound.py`, `maintenance.py`, `maintenance_checks.py`, `replay.py`) were run with Python 3.10 on Windows, with NumPy 2.2, pandas 2.2, scikit-learn 1.4 and PyTorch 2.10. Gradient-boosting results shift slightly between scikit-learn versions (set 1 B3 RMSE 37.3 h with 1.9, 39.7 h with 1.4); the conclusions do not change.
+The Part II scripts (`rul_bound.py`, `maintenance.py`, `maintenance_checks.py`) were run with Python 3.10 on Windows, with NumPy 2.2, pandas 2.2, scikit-learn 1.4 and PyTorch 2.10. Gradient-boosting results shift slightly between scikit-learn versions (set 1 B3 RMSE 37.3 h with 1.9, 39.7 h with 1.4); the conclusions do not change.
 
 ---
 
@@ -248,7 +246,7 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 
 ### 6.1 Strategy comparison
 
-[pipeline/maintenance.py](pipeline/maintenance.py) replays six strategies on the same 12 bearings and scores them by cost per 1,000 operating hours (planned replacement = 1, breakdown = 10; renewal-reward estimate, each bearing one cycle). Condition-based strategies replace the bearing 24 h (lead time) after their alarm; if it breaks first, that counts as a breakdown, and an alarm on a healthy bearing counts as a needless replacement. A needless replacement is charged even when the test ends before the crew would arrive (set 2 B4 alarms 3.7 h before the end), which counts against condition-based maintenance.
+[pipeline/maintenance.py](pipeline/maintenance.py) replays six strategies on the same 12 bearings and scores them by cost per 1,000 hours on test (planned replacement = 1, breakdown = 10; renewal-reward estimate, each bearing one cycle). These are calendar hours; 6.2 re-scores with the hours the rig actually ran. Condition-based strategies replace the bearing 24 h (lead time) after their alarm; if it breaks first, that counts as a breakdown, and an alarm on a healthy bearing counts as a needless replacement. A needless replacement is charged even when the test ends before the crew would arrive (set 2 B4 alarms 3.7 h before the end), which counts against condition-based maintenance.
 
 | Strategy | Failures caught | Breakdowns | Needless replacements | Life wasted per catch | Cost / 1,000 h |
 | --- | --- | --- | --- | --- | --- |
@@ -273,9 +271,9 @@ Takeaway: with 4 failures, a network cannot learn rare faults from real labels, 
 | 12-48 h | 3/4, 2.0 | 3/4, 1.6 | **4/4, 0.8** |
 | 72 h | 1/4, 4.36 | 1/4, 3.78 | 1/4, 4.37 |
 
-Acting on either alarm catches all 4 failures only if the bearing can be replaced within about 2 days of the alarm; at 72 h every rule catches 1 of 4, although all three still cost less than reactive. At the default thresholds the AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
+Acting on either alarm catches all 4 failures only if the bearing can be replaced within about 2 days of the alarm; at 72 h every rule catches 1 of 4, although all three still cost less than reactive. At the default thresholds the AI detector adds value in the 12-48 h window; with a fast crew (≤ 8 h, or ≤ 4 h counting only running hours) the physics alarm alone catches everything. Full tables: `maintenance_strategies.csv`, `maintenance_cost_curve.csv`, `maintenance_lead_sweep.csv`.
 
-**See it happen:** [bearing_replay.html](bearing_replay.html) tells test 2 as a seven-step story for a general audience. Bearing 1's vibration rises, Part I raises the alarm (hour 94) and names an outer-race fault, and Part II's crew fits a new bearing at hour 118. The last two steps show why two detectors are used and the cost over all 12 bearings. Open it in a browser and step through with Next or the arrow keys. After hour 118 the chart keeps showing the old bearing as a grey dashed line, because in the real test nobody replaced it. [pipeline/replay.py](pipeline/replay.py) writes the page's data and checks every alarm time and verdict against `dl_summary.csv`; the page's cost model reproduces `maintenance_cost_curve.csv` and `maintenance_lead_sweep.csv`.
+**Test 2 replayed:** slides 9 and 10 of the Part II deck follow bearing 1 of test 2 under this rule. Part I raises the alarm at hour 94 and names an outer-race fault; that alarm is the trigger, and the rule opens a work order automatically (asset, fault, due time, filled in by code; a later alarm on the same bearing opens no second order). The crew needs 24 h, so the bearing is replaced at hour 118, 45.5 h before it broke in the real test. Over all 12 bearings the same trigger opens 6 work orders: 4 in time, 2 unneeded (`maintenance_work_orders.csv`, written by `maintenance.py`).
 
 ### 6.2 Robustness checks
 
@@ -287,6 +285,7 @@ Acting on either alarm catches all 4 failures only if the bearing can be replace
 | Thresholds were tuned on these bearings: re-score over 27 settings (K = 6/8/10, physics floor 0.10/0.15/0.20, AI floor 0.4/0.5/0.6), at lead time 24 h and breakdown 10× | Physics OR AI catches 4/4 in **27/27** settings, cost 0.81-1.08. AI alone: 3/4 in all, 1.60-1.61. Physics alone: 4/4 in only 9/27 (floor 0.10), cost 0.81-2.03. The AI floor changed nothing in this range, so the 27 settings give 9 distinct outcomes. |
 | Drop one test and re-score the other two (preventive re-tuned on them, alarm thresholds not re-tuned; a sensitivity check, not out-of-sample validation) | Physics OR AI beats reactive (3.95-7.57) and preventive (1.21-3.54) in every case, at 0.59-1.06. The single alarms do not: with set 2 dropped, preventive (1.21) beats physics (1.91) and AI (1.61). With set 3 dropped, AI alone (0.79) is the cheapest rule. |
 | False alarm costs more than a planned job | Physics OR AI stays cheapest up to a needless replacement of about 4× a planned one; above that, AI alone (no false alarms) is cheaper (1.61 vs 1.91 at 5×). |
+| Set 1 was stopped for 484 of its 828 h (the IMS readme: long gaps between files mean the test paused until the next working day). Re-score in running hours: snapshot gaps of at most 1 h summed, for cycle lengths, alarm warnings and the preventive interval | Same ranking. Physics OR AI catches 4/4 at 1.11 per 1,000 running hours, against 6.41 for reactive (5.8×) and 5.33 for preventive (every 340 h). It beats reactive from 1.8× breakdown cost and preventive at every ratio up to 100×, and still catches 4/4 for lead times up to 48 h. Physics alone catches 4/4 only with a lead of 4 h or less (set 1 B3 warns 4.6 running hours ahead), and the single alarms lose to preventive above about 29× (physics) and 35× (AI), against 41× and 48× in calendar hours. The threshold and drop-one-test checks above use calendar hours. |
 
 **What this means:** the AI alarm's value is as **insurance**. With a slightly lower physics floor (0.10), physics alone also catches all four, but a factory cannot tune that floor on failures it has not seen yet; acting on either alarm catches all four in every threshold setting tried. Which single alarm rule is cheapest depends on the data subset and on how expensive false alarms are, so we do not claim a winner among the condition-based rules. At lead time 24 h and breakdown cost 10×, acting on either alarm is the only rule that beats reactive and preventive in every drop-one-test case.
 
@@ -338,7 +337,6 @@ python pipeline/rul.py               # → rul_metrics.csv, rul_predictions.csv,
 python pipeline/rul_bound.py         # ~1 min → rul_bound_*.csv/png (negative-result experiment)
 python pipeline/maintenance.py       # seconds → maintenance_*.csv, maintenance_strategies.png
 python pipeline/maintenance_checks.py  # ~1 min → maintenance_check_*.csv
-python pipeline/replay.py            # ~20 s → data block of bearing_replay.html
 ```
 
 `diagnosis.py` needs `features.py` and `diag_features.py` to have run first; `dl_diagnosis.py` also needs `diagnosis.py`'s inputs and `dl_spectra.py`.
@@ -352,6 +350,7 @@ python pipeline/replay.py            # ~20 s → data block of bearing_replay.ht
 - **Late inner-race evidence.** Set 1 B3's rhythm appears only in the last ~12 h.
 - **Constant speed assumed per snapshot.** The speed search handles a constant offset; a variable-speed machine would need a tachometer and order tracking.
 - **Peer contrast needs peers.** It assumes several similar bearings on one machine, and it weakens if several fail at once.
+- **Calendar hours.** Part II costs are per hour on test, and set 1 was paused for 484 of its 828 h. Counting only running hours raises the costs by about a third (preventive's doubles) but keeps the ranking and the conclusions (6.2).
 - **Bearings costed independently.** The Part II cost model treats each bearing as its own replacement cycle. On a real shaft, replacing one bearing stops the machine, and the crew may replace its neighbours in the same stop.
 
 ---

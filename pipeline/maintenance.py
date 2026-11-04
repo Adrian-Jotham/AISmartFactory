@@ -67,6 +67,26 @@ def rate(pairs):
     return 1000 * cost / hours
 
 
+def work_orders(b, phys, ai, lead):
+    """The automation: the first alarm on a bearing opens one work order (a later alarm opens none).
+
+    Hours are counted from the start of each test. The fault field is Part I's Stage B verdict."""
+    rows = []
+    for r, p, a in zip(b.itertuples(), phys, ai):
+        w = np.fmax(p, a)                         # warning of the earliest alarm (hours before end)
+        if np.isnan(w):
+            continue
+        opened = r.end_h - w
+        due = opened + lead
+        status = ("unneeded (false alarm)" if not r.failed
+                  else "in time" if due <= r.end_h else "too late (breakdown)")
+        rows.append({"work_order": f"WO-T{r.set}-B{r.bearing}", "asset": f"test {r.set}, bearing {r.bearing}",
+                     "task": f"replace bearing {r.bearing}", "fault": r.verdict,
+                     "opened_by": "physics alarm" if w == p else "AI alarm",
+                     "opened_h": round(opened, 1), "due_h": round(due, 1), "status": status})
+    return pd.DataFrame(rows)
+
+
 def selfcheck():
     assert outcome(100, True, np.nan, 24, 10) == (10, 100)      # no alarm: breakdown
     assert outcome(100, True, 50, 24, 10) == (1, 74)            # caught, 26 h of life wasted
@@ -84,7 +104,8 @@ def main():
     args = ap.parse_args()
     selfcheck()
 
-    b = pd.read_csv(OUT_DIR / "dl_summary.csv")[["set", "bearing", "truth", "stageA_alarm_h", "ae_alarm_h"]]
+    b = pd.read_csv(OUT_DIR / "dl_summary.csv")[["set", "bearing", "truth", "stageA_alarm_h", "ae_alarm_h",
+                                                 "verdict[proposed]"]].rename(columns={"verdict[proposed]": "verdict"})
     b["failed"] = b["truth"] != "healthy"
     b["end_h"] = b["set"].map(TEST_END_H)
     triggers = {"physics": b["stageA_alarm_h"].to_numpy(float),
@@ -128,6 +149,15 @@ def main():
     table.to_csv(OUT_DIR / "maintenance_strategies.csv", index=False)
     print(f"Lead time {args.lead:g} h, breakdown costs {args.ratio:g}x a planned replacement:")
     print(table.round(2).to_string(index=False))
+
+    # The automation behind "physics OR AI": one work order per first alarm
+    wo = work_orders(b, triggers["physics"], triggers["AI"], args.lead)
+    orr = table.set_index("strategy").loc["physics OR AI"]
+    assert (wo["status"] == "in time").sum() == orr.failures_caught
+    assert (wo["status"] == "unneeded (false alarm)").sum() == orr.needless_replacements
+    wo.to_csv(OUT_DIR / "maintenance_work_orders.csv", index=False)
+    print("\nWork orders opened automatically by the first alarm:")
+    print(wo.to_string(index=False))
 
     # Cost rate vs breakdown cost ratio
     curve = pd.DataFrame([{"ratio": r, **cost_rates(r, args.lead)} for r in RATIOS])

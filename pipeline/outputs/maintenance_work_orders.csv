@@ -1,0 +1,7 @@
+work_order,asset,task,fault,opened_by,opened_h,due_h,status
+WO-T1-B3,"test 1, bearing 3",replace bearing 3,inner,AI alarm,756.6,780.6,in time
+WO-T1-B4,"test 1, bearing 4",replace bearing 4,roller,AI alarm,708.7,732.7,in time
+WO-T2-B1,"test 2, bearing 1",replace bearing 1,outer,physics alarm,94.0,118.0,in time
+WO-T2-B4,"test 2, bearing 4",replace bearing 4,outer,physics alarm,159.8,183.8,unneeded (false alarm)
+WO-T3-B3,"test 3, bearing 3",replace bearing 3,outer,physics alarm,1020.4,1044.4,in time
+WO-T3-B4,"test 3, bearing 4",replace bearing 4,unspecified,physics alarm,345.0,369.0,unneeded (false alarm)

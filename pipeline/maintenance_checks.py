@@ -9,10 +9,14 @@
      re-tuned on them), to show how much one bearing moves the ranking.
   4. Needless replacement cost: a false alarm may cost more than a planned
      replacement (downtime). Re-scores with needless = 1, 2, 5.
+  5. Running hours: the IMS readme says a long gap between files means the
+     test stopped until the next working day (set 1 is stopped 484 of 828 h).
+     Re-scores with the hours the rig ran (snapshot gaps of at most 1 h summed)
+     instead of calendar hours, for cycle lengths, alarm warnings and T.
 
 Usage:  python pipeline/maintenance_checks.py      (~1 min, CPU)
 Needs:  features.py, diagnosis.py, dl_diagnosis.py outputs
-Outputs: pipeline/outputs/maintenance_check_{crosstalk,thresholds,leave_test_out,needless}.csv
+Outputs: pipeline/outputs/maintenance_check_{crosstalk,thresholds,leave_test_out,needless,running_hours}.csv
 """
 import itertools
 
@@ -23,7 +27,7 @@ import torch
 import diagnosis as G
 import dl_diagnosis as D
 from common import FAILED_RUNS, OUT_DIR, load_features
-from maintenance import T_GRID, TEST_END_H, age_replacement, outcome, rate
+from maintenance import LEADS, T_GRID, TEST_END_H, age_replacement, outcome, rate
 
 LEAD, RATIO = 24.0, 10.0
 FAILED = {(s, b) for s, b, _ in FAILED_RUNS}
@@ -150,6 +154,66 @@ def needless_cost(b):
     print(out.round(2).to_string(index=False))
 
 
+def to_running(b):
+    """Cycle lengths and alarm warnings in hours the rig ran: snapshot gaps over 1 h are pauses."""
+    b = b.copy()
+    for s in (1, 2, 3):
+        t = np.sort(load_features(s)["timestamp"].unique())
+        cal = (t - t[0]) / np.timedelta64(1, "h")
+        gap = np.diff(cal, prepend=0.0)
+        run = np.cumsum(np.where(gap <= 1.0, gap, 0.0))
+        m = b["set"] == s
+        b.loc[m, "end_h"] = run[-1]
+        for col in ("stageA_alarm_h", "ae_alarm_h"):          # warning = running hours from alarm to end
+            b.loc[m, col] = run[-1] - np.interp(cal[-1] - b.loc[m, col].to_numpy(float), cal, run)
+    b["either"] = np.fmax(b["stageA_alarm_h"], b["ae_alarm_h"])
+    return b
+
+
+def costs(b, lead=LEAD, cf=RATIO):
+    """(caught, needless, cost per 1,000 h) per strategy, as in maintenance.py."""
+    recs = list(zip(b["failed"], b["end_h"]))
+    prev = [rate([age_replacement(e, f, T, cf) for f, e in recs]) for T in T_GRID]
+    T = T_GRID[int(np.argmin(prev))]
+    f, e = b["failed"].to_numpy(bool), b["end_h"].to_numpy(float)
+    out = {"reactive": (0, 0, rate([(cf if f else 0.0, e) for f, e in recs])),
+           "preventive": (int((f & (e > T)).sum()), int((~f & (e > T)).sum()), min(prev)), "preventive_T": int(T)}
+    for name, col in (("physics", "stageA_alarm_h"), ("AI", "ae_alarm_h"), ("physics OR AI", "either")):
+        out[name] = score(recs, b[col].to_numpy(float), lead, cf)
+    out["oracle"] = (int(f.sum()), 0, rate([(1.0 if f else 0.0, e) for f, e in recs]))
+    return out
+
+
+def running_hours(b):
+    r = to_running(b)
+    print("Failed bearings, running hours:")
+    print(r[r["failed"]][["set", "bearing", "end_h", "stageA_alarm_h", "ae_alarm_h"]].round(1).to_string(index=False))
+    rows = []
+    for basis, d in (("calendar", b), ("running", r)):
+        for L in LEADS:
+            c = costs(d, lead=L)
+            for name in ("reactive", "preventive", "physics", "AI", "physics OR AI", "oracle"):
+                caught, needless, cost = c[name]
+                rows.append({"hours": basis, "lead_h": L, "strategy": name, "failures_caught": caught,
+                             "needless_replacements": needless, "cost_per_1000h": cost,
+                             "preventive_T_h": c["preventive_T"] if name == "preventive" else np.nan})
+        grid = np.round(np.arange(1.0, 100.0, 0.1), 1)
+        curve = [costs(d, cf=x) for x in grid]
+        for name in ("physics", "AI", "physics OR AI"):
+            react = [x for x, c in zip(grid, curve) if c[name][2] < c["reactive"][2]]
+            prev = [x for x, c in zip(grid, curve) if c[name][2] < c["preventive"][2]]
+            print(f"{basis} hours: {name} beats reactive from {react[0]}x, beats preventive from {prev[0]}x "
+                  + ("to at least 99.9x" if prev[-1] == grid[-1] else f"to {prev[-1]}x"))
+    out = pd.DataFrame(rows)
+    out.to_csv(OUT_DIR / "maintenance_check_running_hours.csv", index=False)
+    d24 = out[out["lead_h"] == LEAD]
+    print(d24.pivot(index="strategy", columns="hours",
+                    values=["failures_caught", "needless_replacements", "cost_per_1000h", "preventive_T_h"])
+          .round(2).to_string())
+    alarms = out[out["strategy"].isin(["physics", "AI", "physics OR AI"])]
+    print(alarms.pivot_table(index="strategy", columns=["hours", "lead_h"], values="failures_caught").to_string())
+
+
 def main():
     print("1. Cross-talk check (set 1 B3 vs B4)")
     crosstalk()
@@ -160,6 +224,8 @@ def main():
     leave_test_out(b)
     print("\n4. Needless replacement cost (planned = 1, breakdown = 10)")
     needless_cost(b)
+    print("\n5. Running hours instead of calendar hours (lead 24 h, breakdown 10x)")
+    running_hours(b)
     print(f"\nwrote maintenance_check_*.csv to {OUT_DIR}")
 
 
