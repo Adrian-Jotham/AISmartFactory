@@ -1,0 +1,4 @@
+set,params,onnx_f32_bytes,onnx_int8_bytes,latency_f32_us,latency_int8_us,alarms_same_f32,alarms_same_int8,n_alarms
+1,524,3076,5601,13.4,13.9,True,True,2
+2,524,3076,5601,8.7,11.8,True,True,1
+3,524,3076,5601,17.6,24.6,True,True,0

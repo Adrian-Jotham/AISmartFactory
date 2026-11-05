@@ -5,6 +5,7 @@
 
 # Large regenerable intermediate arrays
 pipeline/outputs/*.npy
+pipeline/outputs/*_int8.onnx
 
 # Python
 __pycache__/

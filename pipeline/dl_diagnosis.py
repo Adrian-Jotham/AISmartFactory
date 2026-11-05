@@ -88,8 +88,9 @@ class AE(nn.Module):
         return self.dec(self.enc(x))
 
 
-def ae_detection(feats: pd.DataFrame, seed=0):
-    """Reconstruction-error health index per bearing, peer contrast, alarms."""
+def ae_detection(feats: pd.DataFrame, seed=0, infer=None):
+    """Reconstruction-error health index per bearing, peer contrast, alarms.
+    `infer(model, v)` replaces the PyTorch forward pass (edge_export.py scores with the exported model)."""
     x = np.log(feats.pivot_table(index="timestamp", columns="bearing",
                                  values=AE_FEATURES, aggfunc="mean"))
     bearings = sorted(feats["bearing"].unique())
@@ -109,16 +110,22 @@ def ae_detection(feats: pd.DataFrame, seed=0):
     err = {}
     with torch.no_grad():
         for b in bearings:
-            v = torch.tensor((x.xs(b, axis=1, level="bearing")[AE_FEATURES].to_numpy() - mu) / sd,
-                             dtype=torch.float32)
-            err[b] = ((model(v) - v) ** 2).mean(1).numpy()
-    err = pd.DataFrame(err, index=x.index).rolling(SMOOTH, min_periods=1).median()
+            v = ((x.xs(b, axis=1, level="bearing")[AE_FEATURES].to_numpy() - mu) / sd).astype(np.float32)
+            r = infer(model, v) if infer else model(torch.from_numpy(v)).numpy()
+            err[b] = ((r - v) ** 2).mean(1)
+    return score_alarms(pd.DataFrame(err, index=x.index), n)
+
+
+def score_alarms(err: pd.DataFrame, n: int, floor=AE_FLOOR, k_sigma=K_SIGMA):
+    """Anomaly score per bearing (columns) -> peer contrast and alarms. Shared by the AI alarm
+    and the foundation-model alarm (fm_alarm.py), so both use the identical rule."""
+    err = err.rolling(SMOOTH, min_periods=1).median()
     hi = np.log(err / err.iloc[:n].median())
-    contrast = pd.DataFrame({b: hi[b] - hi.drop(columns=b).median(axis=1) for b in bearings})
+    contrast = pd.DataFrame({b: hi[b] - hi.drop(columns=b).median(axis=1) for b in err.columns})
     alarms = {}
-    for b in bearings:
+    for b in err.columns:
         ref = contrast[b].iloc[:n].to_numpy()
-        lim = np.median(ref) + max(K_SIGMA * robust_sd(ref), AE_FLOOR)
+        lim = np.median(ref) + max(k_sigma * robust_sd(ref), floor)
         alarms[b] = persistent(contrast[b].to_numpy() > lim)
     return contrast, alarms
 

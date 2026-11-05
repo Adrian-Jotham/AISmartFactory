@@ -9,6 +9,7 @@ until their test ended) and scored by cost per 1,000 operating hours:
   AI            condition-based, autoencoder alarm (dl_summary.csv, no labels)
   physics OR AI condition-based, whichever alarm fires first
   oracle        replace each failing bearing just in time (lower bound)
+  MOMENT / UniFault (zero-shot)  foundation-model alarms, if fm_summary.csv exists (fm_alarm.py)
 
 Condition-based: the crew replaces the bearing --lead hours after the alarm
 (parts + scheduling). If it breaks first, that is a breakdown. An alarm on a
@@ -40,7 +41,8 @@ T_GRID = np.arange(24, 1100, 4)                # preventive intervals searched
 LEADS = (4, 8, 12, 24, 48, 72)                 # crew lead times swept (h)
 RATIOS = np.array([1.5, 2, 3, 5, 7, 10, 15, 20, 30, 50, 70, 100])
 COLORS = {"reactive": "#d64545", "preventive": "#8a9a9b", "physics": "#1f8a8a",
-          "AI": "#7b4fd6", "physics OR AI": "#f26b4f", "oracle": "#12262b"}
+          "AI": "#7b4fd6", "physics OR AI": "#f26b4f", "oracle": "#12262b",
+          "MOMENT (zero-shot)": "#b8860b", "UniFault (zero-shot)": "#8b5a2b"}
 
 
 def outcome(end, failed, warn, lead, cf, cp=1.0):
@@ -111,6 +113,11 @@ def main():
     triggers = {"physics": b["stageA_alarm_h"].to_numpy(float),
                 "AI": b["ae_alarm_h"].to_numpy(float)}
     triggers["physics OR AI"] = np.fmax(triggers["physics"], triggers["AI"])  # earliest alarm
+    fm = OUT_DIR / "fm_summary.csv"               # optional: zero-shot foundation-model alarms (fm_alarm.py)
+    if fm.exists():
+        fm = b[["set", "bearing"]].merge(pd.read_csv(fm), on=["set", "bearing"], how="left")
+        triggers["MOMENT (zero-shot)"] = fm["moment_alarm_h"].to_numpy(float)
+        triggers["UniFault (zero-shot)"] = fm["unifault_alarm_h"].to_numpy(float)
     end, failed = b["end_h"].to_numpy(), b["failed"].to_numpy()
 
     def cost_rates(cf, lead):

@@ -27,7 +27,7 @@ Team course project on fault diagnosis (Part I) and predictive maintenance (Part
 | Question | When did a bearing start failing, which one, and what part is damaged? | Which maintenance strategy, and what does condition monitoring buy? |
 | Approach | Signal processing + robust statistics, no training | Strategy comparison: reactive, preventive, condition-based (physics / AI) |
 | Labels needed | None | None for the strategies; run-to-failure histories for the RUL attempts |
-| Main scripts | `diag_features.py`, `diagnosis.py` | `maintenance.py` (+ `rul.py`, `rul_bound.py`) |
+| Main scripts | `diag_features.py`, `diagnosis.py` | `maintenance.py` (+ `rul.py`, `rul_bound.py`, `fm_alarm.py`, `edge_export.py`) |
 | Status | Done, evaluated on all 12 bearings | Done, evaluated on all 12 bearings |
 
 Course brief: [guide.txt](guide.txt). Part I does not require AI/ML; practical implementation on a dataset counts toward "Technical Depth & Application".
@@ -44,7 +44,8 @@ NasaDataset/
 ├── fault_diagnosis_explained.md           ← Part I explained simply (Feynman style, with figures)
 ├── fault_diagnosis_part1_short.pptx       ← 11-slide Part I presentation
 ├── fault_diagnosis_presentation.pptx      ← 22-slide full deck (Part I + deep-learning variant)
-├── predictive_maintenance_part2.pptx      ← 18-slide Part II presentation (maintenance strategies)
+├── predictive_maintenance_part2.pptx      ← 19-slide Part II presentation (maintenance strategies)
+├── final_report.docx                      ← final report, Part I + Part II (8 pages)
 ├── 1st_test/ 2nd_test/ 3rd_test/          ← raw data (not in git, ~6 GB, see Setup)
 └── pipeline/
     ├── common.py          shared loading, dead-snapshot removal, failed-run list
@@ -59,6 +60,9 @@ NasaDataset/
     ├── maintenance.py     Part II: maintenance strategy comparison (cost, lead-time sweep, automatic work orders)
     ├── rul_bound.py       Part II experiment: conformal RUL bound vs act-at-alarm (negative result)
     ├── maintenance_checks.py  Part II robustness: cross-talk, thresholds, leave-one-test-out, false-alarm cost
+    ├── edge_export.py     AI alarm exported to ONNX: size, identical alarms, input scaling
+    ├── edge_benchmark.py  per-snapshot timing of the AI alarm (raw file → score), run on a Raspberry Pi 5
+    ├── fm_alarm.py        zero-shot foundation-model alarms (MOMENT, UniFault) for comparison
     └── outputs/           all CSVs and figures (the .npy arrays are not in git)
 ```
 
@@ -312,6 +316,30 @@ Two attempts to turn RUL into better maintenance timing failed, and are kept as 
 - **Calibrated RUL bound** ([pipeline/rul_bound.py](pipeline/rul_bound.py)): a one-sided conformal lower bound on `gbm` (nested leave-one-run-out). Its margin is 17-59 h, as wide as the lead time, so after the Part I alarm it fires almost immediately, and it covered only 52% of set 1 B3's points against the 90% target. It never catches more failures than "act at the alarm": at 4-8 h lead time it catches 3 instead of 4, and at 12-48 h it catches the same 3 and saves at most about 5 h of bearing life (`rul_bound_sweep.csv`). The data explains why: after the alarm the four bearings lasted 12, 53, 70 and 97 h, too spread for 3 training examples to predict.
 - **Zero-shot foundation model** (Chronos-2 via chronos-forecasting 2.3.2; an exploratory run, not part of the pipeline) on set 2 B1: it forecasts the health index levelling off instead of accelerating, and was worse than both baselines. Scored at forecast origins every 2 h over the last 100 h, its median-forecast RMSE was 55.6 h against 25.2 h for `gbm` and 42.5 h for `hi` (over every snapshot `gbm` scores 25.7 h, as in the table above).
 
+### 6.4 Foundation models and edge deployment
+
+**Foundation models as a third alarm** ([pipeline/fm_alarm.py](pipeline/fm_alarm.py)). Two pretrained models, used zero-shot (not trained on IMS by us): MOMENT-1-small (general time-series model, ICML 2024, 38 M parameters) and UniFault-Tiny (bearing-vibration model, 2025, 0.8 M parameters). Each snapshot is cut into windows (MOMENT: 40 × 512 samples; UniFault: 10 × 0.1 s resampled to 1,024 samples), embedded, and averaged. The score is the mean squared z-distance to the 5 nearest healthy embeddings (first 20% of the test, all bearings pooled), and it goes through the **same** peer-contrast and persistence rule as the autoencoder (`dl_diagnosis.score_alarms`), with no retuning. `maintenance.py` scores them as extra rows (`fm_summary.csv`, `maintenance_strategies.csv`):
+
+| Alarm (lead 24 h, breakdown 10×) | Caught | Breakdowns | Needless | Cost / 1,000 h |
+| --- | --- | --- | --- | --- |
+| AI alarm (autoencoder, 524 weights) | 3 | 1 | 0 | 1.61 |
+| MOMENT-1-small, zero-shot | 3 | 1 | 5 | 3.01 |
+| UniFault-Tiny, zero-shot | 3 | 1 | 2 | 2.16 |
+| Physics OR AI | **4** | **0** | 2 | **0.82** |
+
+Neither model beats the autoencoder. MOMENT alarms on 5 of 8 healthy bearings, and several of its alarms come 440-670 h before the end of the test; its input layer rescales every window (RevIN), which removes the energy rise the physics alarm relies on (a likely reason, not tested). Over the same 9 threshold settings as the AI-alarm check (K 6/8/10 × floor 0.4/0.5/0.6, `fm_threshold_sweep.csv`), MOMENT has 4-7 false alarms (cost 1.72-3.01; it catches 4/4 only at K = 6, with 6-7 false alarms) and UniFault 2-4 (2.16-2.50), so neither beats the autoencoder (1.60-1.61) in any setting. Both models catch set 3 B3, which the autoencoder misses, but the physics alarm already catches it, so "physics OR AI" does not change. Caution: IMS is one of the datasets in the UniFault paper and only the fine-tuning samples were excluded from pretraining, so UniFault has probably seen this data and its result is optimistic.
+
+**Edge** ([pipeline/edge_export.py](pipeline/edge_export.py), [pipeline/edge_benchmark.py](pipeline/edge_benchmark.py)). The autoencoder exported to ONNX is 3,076 bytes; re-running the full alarm rule with the exported model gives identical alarms on all 12 bearings (`edge_export.csv`). Dynamic int8 quantisation gives the same alarms but a larger file (5.6 KB, quantisation metadata dominates at this size), so float32 is kept. `edge_benchmark.py` then times the whole AI-alarm path per snapshot (parse the raw file, 16 features per sensor with `features.channel_features`, ONNX score) on 120 raw snapshots of test 2, single-threaded, on a desktop and on a Raspberry Pi 5 (`edge_benchmark.csv`):
+
+| Per snapshot, 4 sensors (median) | Desktop (i9-14900KF) | Raspberry Pi 5 (8 GB) |
+| --- | --- | --- |
+| Read raw text file | 8.1 ms | 8.2 ms |
+| 16 features per sensor (FFT, envelope) | 6.0 ms | 25.1 ms |
+| Autoencoder (ONNX) | 0.08 ms | 0.18 ms |
+| Features + model | 6.0 ms | 25.3 ms |
+
+The Pi's 480 scores are identical to the desktop's (max relative difference 0), its features match `features_set2.csv`, it did not throttle, and peak memory was 167 MB (Python with pandas). A snapshot arrives every 10 minutes, so the device is idle almost all the time. Feature extraction, not the model, is the cost. A microcontroller was not tested.
+
 ---
 
 ## 7. How to reproduce everything
@@ -337,6 +365,17 @@ python pipeline/rul.py               # → rul_metrics.csv, rul_predictions.csv,
 python pipeline/rul_bound.py         # ~1 min → rul_bound_*.csv/png (negative-result experiment)
 python pipeline/maintenance.py       # seconds → maintenance_*.csv, maintenance_strategies.png
 python pipeline/maintenance_checks.py  # ~1 min → maintenance_check_*.csv
+
+# Part II extras: edge export and foundation models (separate virtual environment,
+# because momentfm pins old numpy/transformers versions; Windows paths, use fmenv/bin/ on Linux)
+python -m venv fmenv && fmenv/Scripts/pip install onnx onnxruntime momentfm
+fmenv/Scripts/python pipeline/edge_export.py   # seconds → edge_export.csv, ae_set*.onnx
+# on the edge device (needs numpy, scipy, pandas, onnxruntime): copy features.py, edge_benchmark.py,
+# ae_set2.onnx, ae_set2_norm.json and some raw snapshots, then
+python edge_benchmark.py --snapshots DIR --model ae_set2.onnx --norm ae_set2_norm.json --out pi_scores.csv --summary pi_timing.csv
+# UniFault-Tiny checkpoint: download link in github.com/emadeldeen24/UniFault (pretrain-epoch=1.ckpt)
+fmenv/Scripts/python pipeline/fm_alarm.py --unifault_ckpt path/to/pretrain-epoch=1.ckpt   # ~10 min on a GPU, needs raw data → fm_summary.csv, fm_threshold_sweep.csv
+python pipeline/maintenance.py       # re-run to add the foundation-model rows
 ```
 
 `diagnosis.py` needs `features.py` and `diag_features.py` to have run first; `dl_diagnosis.py` also needs `diagnosis.py`'s inputs and `dl_spectra.py`.
@@ -351,6 +390,7 @@ python pipeline/maintenance_checks.py  # ~1 min → maintenance_check_*.csv
 - **Constant speed assumed per snapshot.** The speed search handles a constant offset; a variable-speed machine would need a tachometer and order tracking.
 - **Peer contrast needs peers.** It assumes several similar bearings on one machine, and it weakens if several fail at once.
 - **Calendar hours.** Part II costs are per hour on test, and set 1 was paused for 484 of its 828 h. Counting only running hours raises the costs by about a third (preventive's doubles) but keeps the ranking and the conclusions (6.2).
+- **UniFault may have seen IMS.** The foundation-model comparison (6.4) is optimistic for UniFault, because IMS is one of its paper's datasets.
 - **Bearings costed independently.** The Part II cost model treats each bearing as its own replacement cycle. On a real shaft, replacing one bearing stops the machine, and the crew may replace its neighbours in the same stop.
 
 ---

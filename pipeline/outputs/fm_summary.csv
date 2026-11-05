@@ -1,0 +1,13 @@
+set,bearing,truth,moment_alarm_h,unifault_alarm_h
+1,1,healthy,538.6,
+1,2,healthy,,
+1,3,inner race,,
+1,4,roller element,440.6,131.3
+2,1,outer race,73.7,72.7
+2,2,healthy,12.7,
+2,3,healthy,,
+2,4,healthy,45.3,
+3,1,healthy,,
+3,2,healthy,627.0,530.0
+3,3,outer race,55.2,25.7
+3,4,healthy,672.3,672.2
