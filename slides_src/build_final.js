@@ -104,7 +104,7 @@ pres.addSection({ title: "Opening" });
 pres.addSection({ title: "Recap of Part I" });
 {
   const s = add("CONTENT", "Recap of Part I", "Part I found every failing bearing early and named the broken part",
-    "A quick reminder of where Part I left us. Stage A compares each bearing's vibration energy with its neighbours on the same shaft: that tells us which bearing is failing and when. Stage B reads the rhythm of the clicks in the envelope spectrum: that tells us which part is broken. On the four failures, Stage A found all four, a median of 61 hours before the end, and Stage B named all four fault types. Part I stopped at the alarm. Part II starts there: what do we do with it?");
+    "A quick reminder of where Part I left us. Stage A compares each bearing's vibration energy with its neighbours on the same shaft: that tells us which bearing is failing and when. Stage B reads the rhythm of the clicks in the envelope spectrum: that tells us which part is broken. Stage A warned a median of 61 hours before the end, with false alarms on 2 of the 8 healthy bearings. Stage B told the three fault types apart: outer race, inner race and roller. Part I stopped at the alarm. Part II starts there: what do we do with it?");
   const cards = [
     ["Stage A · loudness", "Energy vs. the neighbour bearings", "Which bearing? When?"],
     ["Stage B · rhythm", "Envelope spectrum at the fault frequencies", "Which part: outer race, inner race, ball?"],
@@ -116,7 +116,7 @@ pres.addSection({ title: "Recap of Part I" });
     txt(s, c[1], { x: M + 0.3, y: y + 0.7, w: 6.0, h: 0.4, fontSize: 20 });
     txt(s, "→ " + c[2], { x: M + 0.3, y: y + 1.12, w: 6.0, h: 0.4, fontSize: 20, bold: true, color: COL.coral });
   });
-  [["4 / 4", "failures found"], ["61 h", "median warning before the end"], ["4 / 4", "fault types named"]].forEach((st, i) => {
+  [["61 h", "median warning before the end"], ["3", "fault types told apart: outer race, inner race, roller"], ["2", "false alarms on 8 healthy bearings"]].forEach((st, i) => {
     const y = 1.55 + i * 1.3;
     txt(s, st[0], { x: 7.9, y, w: 2.0, h: 0.9, fontSize: 44, bold: true, color: COL.teal, valign: "middle" });
     txt(s, st[1], { x: 9.95, y, w: 2.8, h: 0.9, fontSize: 20, valign: "middle" });
@@ -282,11 +282,11 @@ pres.addSection({ title: "Method" });
 // 9. Why these models
 {
   const s = add("CONTENT", "Method", "We chose two label-free alarms because the data holds only four failures",
-    "Why these two models and not something bigger? The key constraint is the data: 12 bearings, only 4 failures, and only one inner-race and one roller failure. A supervised classifier, a random forest or a CNN, needs labelled failures of each type. In Part I a supervised CNN could not name a fault type it had not seen. Remaining-life regression needs many run-to-failure histories; with four, its error was as wide as the warning itself. Foundation models are large and, used zero-shot, gave more false alarms. Both of our alarms need only healthy data, which every plant has in plenty. And they look at different signals, energy versus the shape of the feature pattern, so they tend to miss different bearings. That is the reason for using two.");
+    "Why these two models and not something bigger? The key constraint is the data: 12 bearings, only 4 failures, and only one inner-race and one roller failure. A supervised classifier, a random forest or a CNN, needs labelled failures of each type. In Part I a supervised CNN could not name a fault type it had not seen. Remaining-life regression needs many run-to-failure histories; with four, its safety margin was as wide as the lead time. Foundation models are large and, used zero-shot, gave more false alarms. Both of our alarms need only healthy data, which every plant has in plenty. And they look at different signals, energy versus the shape of the feature pattern, so they tend to miss different bearings. That is the reason for using two.");
   T(s, [
     ["Option", "Needs", "Problem with 4 failures", "Decision"],
     ["Supervised classifier (RF, CNN)", "Labelled failures of each type", "1 inner, 1 roller example: can't learn them", { text: "Not used", options: { color: HEX.red, bold: true } }],
-    ["RUL regression", "Many run-to-failure histories", "Error 17-59 h, as wide as the warning", { text: "Tried (appendix)", options: { color: HEX.red, bold: true } }],
+    ["RUL regression", "Many run-to-failure histories", "Safety margin 17-59 h, as wide as the lead time", { text: "Tried (appendix)", options: { color: HEX.red, bold: true } }],
     ["Foundation model, zero-shot", "38 M parameters, no training", "More false alarms than our 3 KB model", { text: "Tested (appendix)", options: { color: HEX.red, bold: true } }],
     ["Physics threshold (Stage A)", "Healthy data only", "None: no training, explainable", { text: "Alarm 1", options: { color: HEX.green, bold: true } }],
     ["Autoencoder", "Healthy data only", "None: tiny, learns the normal pattern", { text: "Alarm 2", options: { color: HEX.green, bold: true } }],
@@ -323,7 +323,7 @@ pres.addSection({ title: "Method" });
   txt(s, [{ text: "Test 3 B3: ", options: { bold: true, color: COL.red } }, { text: "AI never fires: healthy neighbour B4 rose too, so B3 did not stand out" }],
     { x: 9.05, y: ry + 1.77, w: 3.5, h: 1.3, fontSize: 17 });
   box(s, { x: 8.85, y: ry + 3.3, w: 3.88, h: 1.55, fill: { color: COL.teal }, line: { color: COL.teal } });
-  txt(s, [{ text: "Our rule: ", options: { bold: true, color: COL.coral } }, { text: "replace after either alarm. Together they warn in time on all 4", options: { color: COL.white } }],
+  txt(s, [{ text: "Our rule: ", options: { bold: true, color: COL.coral } }, { text: "replace after either alarm. Together, no failure is missed", options: { color: COL.white } }],
     { x: 9.05, y: ry + 3.45, w: 3.5, h: 1.3, fontSize: 18 });
 }
 
@@ -461,8 +461,8 @@ pres.addSection({ title: "Results" });
 // =====================================================================
 // 15. Confusion matrices
 {
-  const s = add("CONTENT", "Results", "Confusion matrices: only the combined rule catches all 4 failures in time",
-    "Here are the alarms as confusion matrices over the 12 bearings. Rows are the truth: failed or healthy. Columns are the decision: replaced in time, meaning an alarm at least 24 hours before failure, or not. For the physics alarm: 3 caught, 1 too late, 2 false alarms on healthy bearings, 6 correctly left alone. The AI alarm: 3 caught, 1 missed, and no false alarms at all. Combined with OR: all 4 caught, no misses, and the 2 false alarms of the physics alarm. Recall goes to 100 percent, at the price of 2 false alarms. Since a miss costs 10 and a false alarm costs 1, that trade is worth it: 2 extra units instead of 10.");
+  const s = add("CONTENT", "Results", "Confusion matrices: only the combined rule misses no failure",
+    "Here are the alarms as confusion matrices over the 12 bearings. Rows are the truth: failed or healthy. Columns are the decision: replaced in time, meaning an alarm at least 24 hours before failure, or not. For the physics alarm: 3 caught, 1 too late, 2 false alarms on healthy bearings, 6 correctly left alone. The AI alarm: 3 caught, 1 missed, and no false alarms at all. Combined with OR: no misses, and the 2 false alarms of the physics alarm. Recall goes to 100 percent, at the price of 2 false alarms. Since a miss costs 10 and a false alarm costs 1, that trade is worth it: 2 extra units instead of 10.");
   const mats = [
     ["Physics alarm", [3, 1, 2, 6]],
     ["AI alarm", [3, 1, 0, 8]],
@@ -500,7 +500,7 @@ pres.addSection({ title: "Results" });
 // 16. Main result
 {
   const s = add("CONTENT", "Results", "Acting on either alarm cuts cost 6× with zero breakdowns",
-    "Here is the result for all strategies, with 24 hours lead time and a breakdown costing 10. Run-to-failure costs 4.84 per 1,000 hours, with four breakdowns. The best fixed interval, every 824 hours, picked with hindsight, costs 2.48: one breakdown and five needless replacements. Each alarm alone misses one failure: 2.03 and 1.61. Acting on either alarm catches all four, no breakdowns, 0.82: about six times cheaper than run-to-failure. The oracle that knows the future would pay 0.48. The gap between us and the oracle is exactly the two false alarms.");
+    "Here is the result for all strategies, with 24 hours lead time and a breakdown costing 10. Run-to-failure costs 4.84 per 1,000 hours, with four breakdowns. The best fixed interval, every 824 hours, picked with hindsight, costs 2.48: one breakdown and five needless replacements. Each alarm alone misses one failure: 2.03 and 1.61. Acting on either alarm has no breakdowns, 0.82: about six times cheaper than run-to-failure. The oracle that knows the future would pay 0.48. The gap to the oracle has two causes: the two false alarms, and replacing bearings before they would fail, so fewer hours are counted. Most of it is the false alarms.");
   const cats = ["Reactive (run to failure)", "Preventive, every 824 h*", "Physics alarm only", "AI alarm only", "Physics OR AI (our rule)", "Oracle (knows the future)"];
   s.addChart(pres.charts.BAR, [{ name: "Cost per 1,000 h", labels: cats, values: [4.84, 2.48, 2.03, 1.61, 0.82, 0.48] }], Object.assign(axis(), {
     x: M, y: 1.5, w: 7.9, h: 4.9, barDir: "bar", catAxisOrientation: "maxMin", barGapWidthPct: 45,
@@ -513,7 +513,7 @@ pres.addSection({ title: "Results" });
     ["Reactive", "0", "4", "0"], ["Preventive*", "3", "1", "5"], ["Physics", "3", "1", "2"], ["AI", "3", "1", "0"],
     [{ text: "Either", options: { bold: true, color: HEX.coral } }, { text: "4", options: { bold: true } }, { text: "0", options: { bold: true } }, "2"]],
   [1.2, 0.95, 0.88, 0.85], 1.6, { x: 8.85, w: 3.88, fs: 15 });
-  txt(s, "Gap to the oracle (0.82 vs 0.48) = the 2 false alarms", { x: 8.85, y: 4.55, w: 3.88, h: 0.9, fontSize: 18, bold: true, color: COL.teal });
+  txt(s, "Gap to the oracle (0.82 vs 0.48): the 2 false alarms, and replacing before the end, so fewer hours run", { x: 8.85, y: 4.55, w: 3.88, h: 0.9, fontSize: 18, bold: true, color: COL.teal });
   cite(s, "* Best fixed interval, chosen with hindsight, so optimistic. Lead time 24 h.");
 }
 
@@ -521,7 +521,7 @@ pres.addSection({ title: "Results" });
 // 17. Sensitivity
 {
   const s = add("CONTENT", "Results", "Our rule beats run-to-failure once a breakdown costs over 2× a repair",
-    "Is the factor of 10 important? Here we change it. Each group of bars is one breakdown cost: 2, 5, 10 and 20 times a planned replacement. Run-to-failure gets more expensive as breakdowns get more expensive, because it has four of them. Our rule stays flat at 0.82, because it has no breakdowns to pay for. It is already cheaper than run-to-failure at 2 times. If breakdowns are cheap, below about 3.6 times, the AI alarm alone is slightly cheaper, because it has no false alarms. Above that, acting on either alarm wins. In a real plant a breakdown usually costs far more than twice a planned job.");
+    "Is the factor of 10 important? Here we change it. Each group of bars is one breakdown cost: 2, 5, 10 and 20 times a planned replacement. Run-to-failure gets more expensive as breakdowns get more expensive, because it has four of them. Our rule stays flat at 0.82, because it has no breakdowns to pay for. It is already cheaper than run-to-failure at 2 times. If breakdowns are cheap, below about 3.6 times, the AI alarm alone is slightly cheaper, because it has no false alarms. Above that, acting on either alarm wins. We did not measure this ratio for a real plant, so the chart shows where the answer changes.");
   const cats = ["2×", "5×", "10×", "20×"];
   s.addChart(pres.charts.BAR, [
     { name: "Reactive (run to failure)", labels: cats, values: [0.97, 2.42, 4.84, 9.69] },
@@ -545,8 +545,8 @@ pres.addSection({ title: "Results" });
 // =====================================================================
 // 18. Fault-type confusion matrix
 {
-  const s = add("CONTENT", "Results", "Stage B names the right part on all 4 failing bearings",
-    "The work order also carries the fault type from Stage B, so the crew knows what to replace. This matrix covers the six bearings that got a work order. Rows are the truth, columns what Stage B wrote in the order. All four failing bearings are named correctly: two outer race, one inner race, one roller. The two false alarms are healthy bearings. Test 2 bearing 4 was written as outer race: it sits on the same shaft as the failing outer-race bearing 1, and that signature reaches every sensor. Test 3 bearing 4 got unspecified, meaning no fault rhythm was strong enough to name. In practice an unspecified order is a hint to inspect before replacing.");
+  const s = add("CONTENT", "Results", "Stage B names the right part on every failing bearing",
+    "The work order also carries the fault type from Stage B, so the crew knows what to replace. This matrix covers the six bearings that got a work order. Rows are the truth, columns what Stage B wrote in the order. Every failing bearing is named correctly: two outer race, one inner race, one roller. The two false alarms are healthy bearings. Test 2 bearing 4 was written as outer race: it sits on the same shaft as the failing outer-race bearing 1, and that signature reaches every sensor. Test 3 bearing 4 got unspecified, meaning no fault rhythm was strong enough to name. In practice an unspecified order is a hint to inspect before replacing.");
   const cols = ["Outer race", "Inner race", "Roller", "Unspecified"];
   const rowsM = [["Outer race (2)", [2, 0, 0, 0]], ["Inner race (1)", [0, 1, 0, 0]], ["Roller (1)", [0, 0, 1, 0]], ["Healthy (2)", [1, 0, 0, 1]]];
   const x0 = 2.75, y0 = 2.1, cw = 1.3, chh = 0.85;
@@ -563,7 +563,7 @@ pres.addSection({ title: "Results" });
   });
   txt(s, "True condition (bearings with a work order)", { x: M, y: y0 + 4 * chh + 0.1, w: 7.4, h: 0.3, fontSize: 14, color: COL.grey });
   const pts = [
-    ["4 / 4", "failing bearings named correctly", COL.green],
+    ["Correct", "part on each failing bearing: outer, inner, roller", COL.green],
     ["T2 B4", "healthy, written as outer race: B1's outer-race signature on the same shaft", COL.grey],
     ["T3 B4", "healthy, unspecified: no rhythm strong enough → inspect first", COL.grey],
   ];
@@ -578,10 +578,23 @@ pres.addSection({ title: "Results" });
 
 // =====================================================================
 // 19. Conclusion
+{
+  const s = add("CONTENT", "Results", "The AI alarm runs on a Raspberry Pi 5 in 34 ms per snapshot",
+    "Can this run in a factory? We tested it on a real Raspberry Pi 5. The autoencoder exports to a 3 KB ONNX file, and it gives the same alarm times as on the desktop. The full path, from reading the raw file to the alarm score, takes 34 milliseconds per snapshot on a Raspberry Pi 5. A snapshot arrives every 10 minutes, so this is far fast enough.");
+  [["3 KB", "ONNX model, 524 weights"], ["Identical", "alarm times to the desktop model"], ["34 ms", "per snapshot on a Raspberry Pi 5 (desktop 14 ms)"], ["10 min", "between snapshots: ample margin"]].forEach((t, i) => {
+    const x = M + i * 3.1, w = 2.85, y = 1.6;
+    box(s, { x, y, w, h: 2.6 });
+    txt(s, t[0], { x: x + 0.25, y: y + 0.25, w: w - 0.5, h: 1.0, fontSize: 40, bold: true, color: COL.teal, valign: "middle" });
+    txt(s, t[1], { x: x + 0.25, y: y + 1.35, w: w - 0.5, h: 1.1, fontSize: 18 });
+  });
+  txt(s, "Time includes reading the raw file, computing the 16 features and running the model, for 4 sensors.", { x: M, y: 4.55, w: CW, h: 0.6, fontSize: 18, color: COL.grey });
+  cite(s, "Edge monitoring with TinyML: Arciniegas et al., 2025");
+}
+
 pres.addSection({ title: "Conclusion" });
 {
   const s = add("CONTENT", "Conclusion", "Use both alarms, and replace the bearing within two days of the first one",
-    "To conclude. Part I gave us two label-free alarms that fail on different bearings. Acting on either one gives no breakdowns and is about six times cheaper than running to failure. That holds when a breakdown costs more than twice a planned job, and when the crew replaces the bearing within about two days; with 72 hours, most failures are missed. The work order is opened automatically and Stage B tells the crew what to replace. The limits: one lab rig, four failures, assumed costs, thresholds chosen on the same bearings. It is a case study, not a validated accuracy. The backup slides cover robustness, lead time, remaining-life prediction, foundation models and running on a Raspberry Pi.");
+    "To conclude. Part I gave us two label-free alarms that fail on different bearings. Acting on either one gives no breakdowns and is about six times cheaper than running to failure. That holds when a breakdown costs more than twice a planned job, and when the crew replaces the bearing within about two days; with 72 hours, most failures are missed. The work order is opened automatically and Stage B tells the crew what to replace. The limits: one lab rig, four failures, assumed costs, thresholds chosen on the same bearings. It is a case study, not a validated accuracy. The whole AI alarm also runs on a Raspberry Pi 5, 34 milliseconds per snapshot. The backup slides cover robustness, lead time, remaining-life prediction and foundation models.");
   [["0", "breakdowns when acting on either alarm"], ["6×", "cheaper than run-to-failure"],
     ["> 2×", "breakdown cost at which it beats reactive"], ["≤ 48 h", "for the crew to replace the bearing"]].forEach((t, i) => {
     const x = M + i * 3.1, w = 2.85, y = 1.6;
@@ -595,7 +608,9 @@ pres.addSection({ title: "Conclusion" });
     { text: "Limits: ", options: { bold: true, color: COL.teal } },
     { text: "one lab rig, 4 failures, assumed costs, in-sample thresholds: a case study", options: { breakLine: true } },
     { text: "Tried, no gain at 4 failures: ", options: { bold: true, color: COL.teal } },
-    { text: "remaining-life prediction, foundation models (backup slides)" },
+    { text: "remaining-life prediction, foundation models (backup slides)", options: { breakLine: true } },
+    { text: "Edge: ", options: { bold: true, color: COL.teal } },
+    { text: "the AI alarm runs on a Raspberry Pi 5 in 34 ms per snapshot, with the same alarm times" },
   ], { x: M, y: 4.3, w: CW, h: 1.8, fontSize: 19, paraSpaceAfter: 8 });
   txt(s, "Questions and feedback welcome · Adrian F. Jotham, Han Yuxin, Gifar A. Haryadi", { x: M, y: 6.35, w: CW, h: 0.4, fontSize: 16, color: COL.grey });
 }
@@ -679,25 +694,22 @@ const appx = (title, notes) => { const s = add("APPENDIX", "Appendix (hidden)", 
     { x: M, y: 4.75, w: CW, h: 0.8, fontSize: 18, color: COL.grey });
   cite(s, "MOMENT: Goswami et al., 2024 · UniFault: Eldele et al., 2025");
 }
-{
-  const s = appx("E · The AI alarm runs on a Raspberry Pi 5 in 34 ms per snapshot",
-    "Backup for: can this run in a factory? The autoencoder exports to a 3 KB ONNX file and gives identical alarm times. The full path, from reading the raw file to the alarm score, takes 34 milliseconds per snapshot on a Raspberry Pi 5. A snapshot arrives every 10 minutes, so this is far fast enough.");
-  [["3 KB", "ONNX model, 524 weights"], ["Identical", "alarm times to the desktop model"], ["34 ms", "per snapshot on a Raspberry Pi 5 (desktop 14 ms)"], ["10 min", "between snapshots: ample margin"]].forEach((t, i) => {
-    const x = M + i * 3.1, w = 2.85, y = 1.6;
-    box(s, { x, y, w, h: 2.6 });
-    txt(s, t[0], { x: x + 0.25, y: y + 0.25, w: w - 0.5, h: 1.0, fontSize: 40, bold: true, color: COL.teal, valign: "middle" });
-    txt(s, t[1], { x: x + 0.25, y: y + 1.35, w: w - 0.5, h: 1.1, fontSize: 18 });
-  });
-  txt(s, "Time includes reading the raw file, computing the 16 features and running the model, for 4 sensors.", { x: M, y: 4.55, w: CW, h: 0.6, fontSize: 18, color: COL.grey });
-  cite(s, "Edge monitoring with TinyML: Arciniegas et al., 2025");
-}
-
 // ---------- write, post-process the scatter chart, apply theme ----------
 (async () => {
   await pres.writeFile({ fileName: OUT });
   const zip = await JSZip.loadAsync(fs.readFileSync(OUT));
   for (const f of Object.keys(zip.files).filter((f) => /ppt\/charts\/chart\d+\.xml$/.test(f))) {
     let x = await zip.file(f).async("string");
+    if (x.includes("<c:barChart>") && x.includes("<c:lineChart>")) { // bar+line combo: PowerPoint refuses pptxgenjs' output
+      x = x.replace(/(<c:axId val="\d+"\/><c:axId val="\d+"\/>)<c:axId val="\d+"\/>/g, "$1"); // 2 axes per group, not 3
+      x = x.replace(/<c:lineChart>[\s\S]*?<\/c:lineChart>/, (g) => g.replace(/<c:invertIfNegative val="0"\/>/g, "")
+        .replace(/<c:dLblPos val="outEnd"\/>/g, '<c:dLblPos val="t"/>')); // bar-only settings, invalid on a line
+      // AI never fires on test 3 B3: label that bar "none", not "0"
+      x = x.replace(/(<c:v>AI alarm \(autoencoder\)<\/c:v>[\s\S]*?<c:dLbls>)/, "$1" +
+        '<c:dLbl><c:idx val="3"/><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="en-US" sz="1600"/><a:t>none</a:t></a:r></a:p></c:rich></c:tx>' +
+        '<c:dLblPos val="outEnd"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbl>');
+      zip.file(f, x);
+    }
     if (!x.includes("<c:scatterChart>")) continue;
     x = x.replace(/<c:pt idx="\d+"><c:v><\/c:v><\/c:pt>/g, ""); // blanks -> missing points (gaps)
     x = x.replace(/<c:valAx>[\s\S]*?<\/c:valAx>/g, (ax) => // hours axis: whole numbers
